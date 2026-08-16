@@ -3,12 +3,16 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
+#include "trace.h"
 
 static const char *TAG = "ble";
 
@@ -43,6 +47,22 @@ static size_t request_filled;
 
 static uint8_t response[RESPONSE_CAP];
 
+// The applet runs on its own task rather than on the NimBLE host task.
+//
+// Two reasons, one of which cost a debugging session. An mbedTLS P-256
+// signature needs several kilobytes of stack and the host task has about four,
+// so signing inline overflowed it and panicked the chip: the link dropped, the
+// device rebooted, and from the host it looked exactly like a flaky radio.
+// Second, signing takes ~160 ms, which is a long time to hold up the BLE host.
+//
+// Sized well above what mbedtls_pk_sign() needs for P-256; RSA is bigger still
+// but runs on this chip's hardware accelerator.
+#define APDU_TASK_STACK 12288
+
+static SemaphoreHandle_t work_ready;
+static size_t work_length;
+static volatile bool worker_busy;
+
 static void start_advertising(void);
 
 bool ble_transport_connected(void) {
@@ -76,8 +96,17 @@ static void send_response(const uint8_t *payload, size_t length) {
     sent += take;
 
     struct os_mbuf *buffer = ble_hs_mbuf_from_flat(framed, offset);
-    if (!buffer) return;
-    if (ble_gatts_notify_custom(connection_handle, response_value_handle, buffer) != 0) return;
+    if (!buffer) {
+      // Out of mbufs: the host is now waiting for a response that will never
+      // come, so say so rather than fail silently.
+      trace_ble("mbuf_exhausted", (int)offset);
+      return;
+    }
+    int rc = ble_gatts_notify_custom(connection_handle, response_value_handle, buffer);
+    if (rc != 0) {
+      trace_ble("notify_failed", rc);
+      return;
+    }
   }
 }
 
@@ -100,18 +129,35 @@ static void receive_chunk(const uint8_t *data, size_t length) {
   request_filled += length;
   if (request_filled < request_expected) return;
 
-  size_t apdu_len = request_expected;
+  work_length = request_expected;
   request_expected = 0;
   request_filled = 0;
 
-  size_t response_len = sizeof(response);
-  if (!apdu_handler ||
-      !apdu_handler(request, apdu_len, response, &response_len, sizeof(response))) {
-    const uint8_t failure[] = {0x6f, 0x00};
-    send_response(failure, sizeof(failure));
+  // The transport is strictly request/response, so a second APDU arriving
+  // while one is in flight means a confused host, not a queue to drain.
+  if (worker_busy) {
+    trace_ble("overlap", 0);
     return;
   }
-  send_response(response, response_len);
+  worker_busy = true;
+  xSemaphoreGive(work_ready);
+}
+
+static void apdu_task(void *arg) {
+  (void)arg;
+  while (true) {
+    xSemaphoreTake(work_ready, portMAX_DELAY);
+
+    size_t response_len = sizeof(response);
+    if (!apdu_handler ||
+        !apdu_handler(request, work_length, response, &response_len, sizeof(response))) {
+      const uint8_t failure[] = {0x6f, 0x00};
+      send_response(failure, sizeof(failure));
+    } else {
+      send_response(response, response_len);
+    }
+    worker_busy = false;
+  }
 }
 
 static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -159,6 +205,7 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_CONNECT:
       if (event->connect.status == 0) {
         connection_handle = event->connect.conn_handle;
+        trace_ble("connect", event->connect.conn_handle);
         ESP_LOGI(TAG, "connected");
       } else {
         start_advertising();
@@ -166,6 +213,10 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       break;
 
     case BLE_GAP_EVENT_DISCONNECT:
+      // The reason code distinguishes a host that closed the link cleanly
+      // from a supervision timeout, which is what a crash or a walk out of
+      // range looks like.
+      trace_ble("disconnect", event->disconnect.reason);
       ESP_LOGI(TAG, "disconnected");
       connection_handle = BLE_HS_CONN_HANDLE_NONE;
       request_expected = 0;
@@ -225,6 +276,9 @@ static void host_task(void *param) {
 
 void ble_transport_start(ble_apdu_handler_t handler) {
   apdu_handler = handler;
+
+  work_ready = xSemaphoreCreateBinary();
+  xTaskCreate(apdu_task, "ble_apdu", APDU_TASK_STACK, NULL, 4, NULL);
 
   ESP_ERROR_CHECK(nimble_port_init());
 

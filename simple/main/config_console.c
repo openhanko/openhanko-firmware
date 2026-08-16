@@ -176,6 +176,24 @@ static bool factory_reset(void) {
   return true;
 }
 
+// A panic wipes the trace ring, so the reason the chip came back is the only
+// evidence left that it went away at all. Without this, a firmware crash and a
+// dropped BLE link are indistinguishable from the host.
+static const char *reset_reason_name(void) {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "poweron";
+    case ESP_RST_SW:       return "software";
+    case ESP_RST_PANIC:    return "PANIC";
+    case ESP_RST_INT_WDT:  return "int_wdt";
+    case ESP_RST_TASK_WDT: return "task_wdt";
+    case ESP_RST_WDT:      return "wdt";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_USB:      return "usb";
+    case ESP_RST_EXT:      return "external";
+    default:               return "other";
+  }
+}
+
 static void handle_command(void) {
   char line[192];
 
@@ -184,12 +202,14 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     snprintf(line, sizeof(line),
-             "OK STATUS firmware=simple presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s",
+             "OK STATUS firmware=simple presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s reset=%s uptime=%llus",
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
              piv_pairing_mode_active() ? "on" : "off",
-             config_authorized() ? "unlocked" : "locked");
+             config_authorized() ? "unlocked" : "locked",
+             reset_reason_name(),
+             (unsigned long long)(esp_timer_get_time() / 1000000));
     send_line(line);
 
   } else if (strcmp(command, "CONFIG_UNLOCK") == 0) {

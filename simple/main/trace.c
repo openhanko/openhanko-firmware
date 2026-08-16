@@ -12,6 +12,7 @@ typedef enum {
   TRACE_KIND_APDU = 0,
   TRACE_KIND_CCID,
   TRACE_KIND_EVENT,
+  TRACE_KIND_BLE,
 } trace_kind_t;
 
 typedef struct {
@@ -77,6 +78,13 @@ void trace_event(const char *name) {
   entry->name = name;
 }
 
+void trace_ble(const char *name, int code) {
+  trace_entry_t *entry = claim_slot();
+  entry->kind = TRACE_KIND_BLE;
+  entry->name = name;
+  entry->sw = (uint16_t)code;
+}
+
 void trace_clear(void) {
   next_slot = 0;
   used = 0;
@@ -104,6 +112,11 @@ void trace_dump(void (*emit)(const char *line)) {
       case TRACE_KIND_EVENT:
         snprintf(line, sizeof(line), "TRACE %lu EVENT %s",
                  (unsigned long)entry->ms, entry->name ? entry->name : "?");
+        break;
+      case TRACE_KIND_BLE:
+        snprintf(line, sizeof(line), "TRACE %lu BLE %s code=%d",
+                 (unsigned long)entry->ms, entry->name ? entry->name : "?",
+                 (int)(int16_t)entry->sw);
         break;
       case TRACE_KIND_CCID:
         snprintf(line, sizeof(line), "TRACE %lu CCID %02x %s x%u",
