@@ -94,10 +94,17 @@ bool storage_stage_commit(void) {
   for (int i = 0; i < STORAGE_SLOT_COUNT; i++) {
     if (staged.length[i] == 0) return false;
   }
+  // "PRIVATE KEY" rather than "BEGIN PRIVATE KEY", because the two sources of a
+  // key here disagree on the header. provision.py sends PKCS#8, which begins
+  // "-----BEGIN PRIVATE KEY-----"; mbedtls_pk_write_key_pem emits SEC1 for EC
+  // keys, "-----BEGIN EC PRIVATE KEY-----", which does not contain the longer
+  // string. Demanding the exact PKCS#8 header rejected every key the device
+  // generated for itself, and did so quietly — the only complaint went to a
+  // UART that is not connected on a finished unit.
   if (!strstr(staged.blob[STORAGE_CERT_9A], "BEGIN CERTIFICATE") ||
-      !strstr(staged.blob[STORAGE_KEY_9A], "BEGIN PRIVATE KEY") ||
+      !strstr(staged.blob[STORAGE_KEY_9A], "PRIVATE KEY") ||
       !strstr(staged.blob[STORAGE_CERT_9D], "BEGIN CERTIFICATE") ||
-      !strstr(staged.blob[STORAGE_KEY_9D], "BEGIN PRIVATE KEY")) {
+      !strstr(staged.blob[STORAGE_KEY_9D], "PRIVATE KEY")) {
     return false;
   }
   staged.crc = record_crc(&staged);

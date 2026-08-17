@@ -11,6 +11,7 @@
 #include "pico/rand.h"
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
+#include "piv.h"
 #include "storage.h"
 
 // Certificates outlive any plausible service life of the hardware. There is no
@@ -71,6 +72,13 @@ static bool key_label(const mbedtls_pk_context *key, char *out, size_t cap) {
 }
 
 const char *identity_common_name(void) {
+  // Derived on demand from the key actually loaded, not remembered from the
+  // boot that generated it. Otherwise a device could not say what it is called
+  // after a power cycle, which is exactly when somebody asks.
+  if (common_name[0] == '\0') {
+    const mbedtls_pk_context *key = piv_auth_key();
+    if (key) key_label(key, common_name, sizeof(common_name));
+  }
   return common_name[0] ? common_name : DEVICE_NAME;
 }
 

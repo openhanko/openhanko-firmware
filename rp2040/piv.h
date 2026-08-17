@@ -50,6 +50,11 @@ uint32_t piv_benchmark_sign(void);
 // system knows to ask for — so it is proof the driver is installed and bound.
 bool piv_private_aid_selected(void);
 
+// The parsed slot 9A key, or NULL when the device holds no identity. Exposed so
+// the label can be derived from whatever key is actually loaded, rather than
+// only from one the device generated this boot.
+const void *piv_auth_key(void);
+
 // Milliseconds since boot when the host first sent any APDU, or 0 if it never
 // has. A device on a charger, or in a hub with no host, stays at 0.
 uint32_t piv_first_contact_ms(void);

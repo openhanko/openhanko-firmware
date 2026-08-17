@@ -504,6 +504,10 @@ static void note_challenge(void) {
   challenge_until = now_ms() + CHALLENGE_WINDOW_MS;
 }
 
+const void *piv_auth_key(void) {
+  return mbedtls_pk_get_type(&auth_key) == MBEDTLS_PK_NONE ? NULL : &auth_key;
+}
+
 bool piv_challenge_active(void) {
   return window_open(challenge_until, CHALLENGE_WINDOW_MS);
 }
