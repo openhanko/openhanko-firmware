@@ -92,6 +92,10 @@ bool button_held_at_boot(void) {
   return held_at_boot;
 }
 
+bool button_is_down(void) {
+  return raw_down();
+}
+
 bool button_pressed(void) {
   uint32_t now = now_ms();
   bool level = raw_down();

@@ -64,6 +64,51 @@ static void handle_press(void) {
   }
 }
 
+// Erases the device on a long press held through power-up.
+//
+// The only destructive action available without a host, so it is deliberately
+// awkward: ten seconds, and the *release* is what commits. A device wedged
+// against something in a bag can hold a button indefinitely but cannot let go,
+// and anyone who started this by accident can keep holding, or let go early,
+// and nothing happens.
+//
+// The light is the entire interface. With no screen, an accelerating blink is
+// the only warning available that something irreversible is approaching, and
+// going solid is the only way to say "now, if you mean it".
+#define RESET_ARM_MS 10000
+
+static void factory_reset_gesture(void) {
+  if (!button_held_at_boot()) return;
+
+  uint32_t started = now_ms();
+  bool armed = false;
+
+  while (button_is_down()) {
+    uint32_t held = now_ms() - started;
+    if (held >= RESET_ARM_MS) {
+      armed = true;
+      status_led_update(STATUS_LED_CONFIRM);
+    } else {
+      // Blink period falls from 500 ms to 100 ms as the deadline approaches.
+      uint32_t period = 500 - (held * 400) / RESET_ARM_MS;
+      bool lit = (now_ms() / (period / 2)) % 2 == 0;
+      status_led_update(lit ? STATUS_LED_CONFIRM : STATUS_LED_OFF);
+    }
+    sleep_ms(5);
+  }
+
+  status_led_update(STATUS_LED_OFF);
+  if (!armed) return;  // let go too early, or thought better of it
+
+  printf("main: factory reset gesture confirmed; erasing\n");
+  storage_erase();
+  settings_reset();
+  sleep_ms(50);
+  // The identity is regenerated on the way back up, so the device comes back
+  // as though it had never been used.
+  watchdog_reboot(0, 0, 0);
+}
+
 // Gives up on pinpad mode when nothing claims the card.
 //
 // Exactly one driver owns a card and macOS picks it at insertion from the AID
@@ -125,16 +170,9 @@ int main(void) {
   button_init();
   settings_init();
 
-  // Escape hatch. A device that has been switched to pinpad mode and then moved
-  // to a Mac without the driver recovers on its own, but only once a host talks
-  // to it. Holding the button through power-up forces standard mode
-  // unconditionally, which covers the cases automation cannot reach.
-  if (button_held_at_boot()) {
-    printf("main: button held at boot; forcing the standard AID\n");
-    settings_set_aid_mode(AID_MODE_STANDARD);
-  }
-  status_led_init();
   storage_init();
+  status_led_init();
+  factory_reset_gesture();
   piv_init();
 
   // A device that has never been given an identity makes its own, so a unit can

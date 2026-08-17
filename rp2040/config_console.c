@@ -130,7 +130,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     snprintf(line, sizeof(line),
-             "OK STATUS firmware=rp2040 presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s name=\"%s\"",
+             "OK STATUS firmware=rp2040 presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s name=\"%s\"",
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
@@ -138,6 +138,9 @@ static void handle_command(void) {
              config_authorized() ? "unlocked" : "locked",
              settings_aid_mode_name(settings_aid_mode()),
              piv_private_aid_selected() ? "yes" : "no",
+             // Whether the button was down when the device booted. Reported so
+             // the reset gesture can be verified without watching the LED.
+             button_held_at_boot() ? "yes" : "no",
              identity_common_name());
     send_line(line);
 

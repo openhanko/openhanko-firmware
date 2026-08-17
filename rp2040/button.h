@@ -18,7 +18,9 @@ void button_init(void);
 // True exactly once per debounced press.
 bool button_pressed(void);
 
-// True if the button was already down when button_init() sampled it. Used as
-// the manual escape hatch out of pinpad mode, for the cases the automatic
-// revert cannot reach.
+// True if the button was already down when button_init() sampled it.
 bool button_held_at_boot(void);
+
+// The current debounced level. button_pressed() reports edges and consumes
+// them, which is wrong for a gesture measured by how long the button is held.
+bool button_is_down(void);
