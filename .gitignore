@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# generated PIV material: never commit. secrets.h holds real private keys in
+# plaintext; only the .example.h templates are tracked.
+*.pem
+keys/
+*/main/secrets.h
+*/secrets.h
+
+# build output
+*/build/
+*/managed_components/
+*/sdkconfig
+*/sdkconfig.old
+.cache/
