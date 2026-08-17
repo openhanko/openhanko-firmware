@@ -57,10 +57,15 @@ void status_led_init(void) {
   put_pixel(0, 0, 0);
 }
 
+// Three flashes of 180 ms, lit for the first half of each.
+#define CONFIRM_FLASHES 3
+#define CONFIRM_CYCLE_MS 180
+
 void status_led_update(status_led_mode_t mode) {
   static status_led_mode_t shown = STATUS_LED_OFF;
   static bool lit;
   static uint32_t last_refresh;
+  static uint32_t confirm_started;
 
   if (mode == STATUS_LED_OFF) {
     if (lit) {
@@ -73,13 +78,31 @@ void status_led_update(status_led_mode_t mode) {
 
   uint32_t now = to_ms_since_boot(get_absolute_time());
 
-  if (mode == STATUS_LED_CONFIRM) {
-    // Solid, and written once rather than every pass: an acknowledgement that
-    // flickers is worse than none, and the WS2812 holds its value anyway.
-    if (shown != STATUS_LED_CONFIRM || !lit) {
+  if (mode == STATUS_LED_ARMED) {
+    // Steady, and written once rather than every pass: the WS2812 holds its
+    // value, so repainting it only costs PIO traffic.
+    if (shown != STATUS_LED_ARMED || !lit) {
       show_level(STATUS_LED_BRIGHTNESS);
       lit = true;
       shown = mode;
+    }
+    return;
+  }
+
+  if (mode == STATUS_LED_CONFIRM) {
+    // Three flashes, timed from the moment the mode was entered. The pattern
+    // runs once and then stays dark even if the caller keeps asking, so a long
+    // acknowledgement window does not turn into a blinking light.
+    if (shown != STATUS_LED_CONFIRM) {
+      confirm_started = now;
+      shown = mode;
+    }
+    uint32_t elapsed = now - confirm_started;
+    bool want = elapsed < (CONFIRM_FLASHES * CONFIRM_CYCLE_MS) &&
+                (elapsed % CONFIRM_CYCLE_MS) < (CONFIRM_CYCLE_MS / 2);
+    if (want != lit) {
+      show_level(want ? STATUS_LED_BRIGHTNESS : 0);
+      lit = want;
     }
     return;
   }

@@ -36,7 +36,7 @@ static uint32_t now_ms(void) {
 // not to be mistaken for the breathing invitation. In standard mode this is the
 // only feedback the device can give: it is never told that macOS wants
 // anything, so it can confirm what it did but never invite.
-#define CONFIRM_MS 700
+#define CONFIRM_MS 600
 
 static uint32_t confirm_until_ms;
 
@@ -87,12 +87,12 @@ static void factory_reset_gesture(void) {
     uint32_t held = now_ms() - started;
     if (held >= RESET_ARM_MS) {
       armed = true;
-      status_led_update(STATUS_LED_CONFIRM);
+      status_led_update(STATUS_LED_ARMED);
     } else {
       // Blink period falls from 500 ms to 100 ms as the deadline approaches.
       uint32_t period = 500 - (held * 400) / RESET_ARM_MS;
       bool lit = (now_ms() / (period / 2)) % 2 == 0;
-      status_led_update(lit ? STATUS_LED_CONFIRM : STATUS_LED_OFF);
+      status_led_update(lit ? STATUS_LED_ARMED : STATUS_LED_OFF);
     }
     sleep_ms(5);
   }

@@ -18,7 +18,14 @@ typedef enum {
   // A pinpad request is outstanding: "press when ready".
   STATUS_LED_BREATHE,
   // Something just happened: "I heard you". Both modes can say this.
+  //
+  // Three quick flashes rather than a steady glow. A press is an event, and a
+  // light that simply comes on for a moment is hard to tell from one that is
+  // stuck — three deliberate blinks cannot be mistaken for either.
   STATUS_LED_CONFIRM,
+  // Steady. Reserved for the factory-reset gesture, where "armed, release to
+  // erase" has to be unmistakably different from an acknowledgement.
+  STATUS_LED_ARMED,
 } status_led_mode_t;
 
 void status_led_init(void);
