@@ -6,7 +6,7 @@ RESPONSE` chunking, and the CCID descriptor are all correct, and the whole
 thing builds clean against ESP-IDF v5.3.4. What follows is what I changed, what
 I deliberately did not change, and why.
 
-## Fixed in `firmware/simple`
+## Fixed in `simple`
 
 ### 1. `tud_task()` is called from two tasks at once
 
@@ -28,7 +28,7 @@ task size or priority of 0. So two tasks pump the same USB event queue and
 class-driver state concurrently. TinyUSB does not support that.
 
 It evidently works in practice, probably because the second pump usually finds
-an empty queue, but it is a genuine race. `firmware/simple` deletes the loop and
+an empty queue, but it is a genuine race. `simple` deletes the loop and
 lets the driver's own task own the stack.
 
 ### 2. 1.7 kB certificate buffer on the APDU dispatch stack
@@ -76,7 +76,7 @@ exist — the reports go out back to back, and only `tud_hid_ready()` keeps them
 from being dropped. Same for the CDC console's retry loop, which becomes a busy
 spin bounded only by its 2-second deadline.
 
-`firmware/simple` sets `CONFIG_FREERTOS_HZ=1000` so these delays mean what they
+`simple` sets `CONFIG_FREERTOS_HZ=1000` so these delays mean what they
 say.
 
 ### 6. The RNG feeding mbedTLS is not a true random source
@@ -101,7 +101,7 @@ obvious move for a port to a chip without an RSA accelerator, and the reason
 this is worth fixing now rather than later. A predictable ECDSA nonce recovers
 the private key from a single signature.
 
-`firmware/simple` calls `bootloader_random_enable()` at startup, which runs the
+`simple` calls `bootloader_random_enable()` at startup, which runs the
 SAR ADC entropy source. Safe here because nothing else touches the ADC or the RF
 subsystem — but anything that later adds BLE must call
 `bootloader_random_disable()` before initialising the radio.
@@ -118,7 +118,7 @@ Following the README as written gets you a device with no identity and no error
 message explaining why.
 
 **Implemented here rather than dropped**, so the documented workflow actually
-works. `tools/provision.py gen-secrets` generates the keys and writes the
+works. `./provision.py gen-secrets` generates the keys and writes the
 header, since hand-pasting a PEM into a C string literal is its own small
 misery. A `secrets.h` still holding the `REPLACE_WITH` placeholders is ignored
 rather than producing a card that enumerates but cannot sign. An NVS-provisioned
@@ -168,7 +168,7 @@ That is an unauthenticated **raw RSA private-key oracle** on attacker-chosen
 
 Left as-is because macOS uses 9d for key management and gating it risks breaking
 flows I cannot test without hardware in front of me. To close it, in
-`firmware/simple/main/piv.c`:
+`simple/main/piv.c`:
 
 ```c
 -  if (apdu[3] == 0x9a) {
@@ -201,7 +201,7 @@ annoying to diagnose.
   internal USB PHY, routed to *either* USB-Serial/JTAG or USB-OTG. Once TinyUSB
   claims it, `ESP_LOG` output over serial-JTAG stops arriving. On a board with
   only the native USB port, the CDC console is your only diagnostic channel —
-  which is what `tools/provision.py monitor` is for.
+  which is what `./provision.py monitor` is for.
 - **`ccid_open()` hardcodes `sizeof(tusb_desc_interface_t) + 54`** to skip the
   CCID class descriptor. Correct against the descriptor as written, and silently
   wrong if anyone edits it. Kept, since the descriptor is not meant to change.
@@ -211,7 +211,7 @@ annoying to diagnose.
 
 ## What the simplification removed
 
-| | upstream | `firmware/simple` |
+| | upstream | `simple` |
 | --- | ---: | ---: |
 | `fingerprint.c` — ZW101 UART protocol | 368 | — |
 | `touch_pin_hid.c` — HID password crypto | 248 | — |

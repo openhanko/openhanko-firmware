@@ -60,7 +60,7 @@ interfaces at once: CCID (class 0x0b), HID keyboard, and CDC.
 
 **BLE caveat:** macOS has no BLE smart-card transport, so wireless PIV needs a
 host-side CryptoTokenKit token driver bridging BLE to a virtual token. That
-driver now exists and works over USB ([macos/](macos/)), which makes wireless a
+driver now exists and works over USB (the [openhanko-macos](../openhanko-macos) repository), which makes wireless a
 transport swap rather than a research problem — but it will be in-session only,
 since pre-login there is no user session for CoreBluetooth to live in.
 
@@ -267,7 +267,7 @@ authenticates as its previous owner wherever they paired it.
 - A momentary button. **GPIO0 is the BOOT button on nearly every S3 board**, so
   the default configuration needs no wiring at all.
 
-Change the pin in [`firmware/simple/main/board_config.h`](firmware/simple/main/board_config.h):
+Change the pin in [`simple/main/board_config.h`](simple/main/board_config.h):
 
 ```c
 #define BUTTON_GPIO 0
@@ -299,13 +299,13 @@ That is convenient now and worth moving off later.
 
 ## The RP2040 port
 
-`firmware/rp2040/` is the same device on a Raspberry Pi RP2040 — cheaper, smaller,
+`rp2040/` is the same device on a Raspberry Pi RP2040 — cheaper, smaller,
 and with no radio, which costs nothing given wireless PIV is impossible anyway.
 It enumerates, macOS reads the certificate and offers to pair.
 
 ```sh
 export PICO_SDK_PATH=~/.pico-sdk/sdk/2.2.0
-cd firmware/rp2040 && mkdir -p build && cd build
+cd rp2040 && mkdir -p build && cd build
 cmake -G Ninja .. && ninja
 # hold BOOTSEL, replug, then:
 cp -X smart_card_rp2040.uf2 /Volumes/RPI-RP2/
@@ -398,7 +398,7 @@ LibreSSL's `openssl req -newkey ec` writes **explicit** EC parameters by default
 
 The failure looks exactly like the missing-PEM-parser one: the certificate
 decodes, the card enumerates, macOS reads the identity, and only signing fails.
-`tools/provision.py` therefore passes `-pkeyopt ec_param_enc:named_curve`, which
+`./provision.py` therefore passes `-pkeyopt ec_param_enc:named_curve`, which
 is what real PIV cards carry anyway and shrinks the key from 377 to 135 bytes.
 
 `STATUS` reports `alg=` and `keyrc=` precisely so this class of failure is one
@@ -420,13 +420,13 @@ With Apple's built-in `pivtoken`: **it never sent a single
 `PC_to_RDR_Secure`**, even with `bPINSupport = 0x01` declared. It ignores pinpad
 entirely.
 
-With the CryptoTokenKit driver in [`macos/`](macos/), pinpad works properly —
+With the CryptoTokenKit driver in the [openhanko-macos](../openhanko-macos) repository, pinpad works properly —
 **no dialog, nothing typed, authenticated by the button alone** — for anything
 going through the Security framework. `sudo` is the exception, because
 `pam_smartcard` collects a PIN before CryptoTokenKit is consulted and hands it
-over pre-filled. See [macos/README.md](macos/README.md).
+over pre-filled. See that repository's README.
 
-With the CryptoTokenKit driver in [`macos/`](macos/), it works. The device
+With the CryptoTokenKit driver in the [openhanko-macos](../openhanko-macos) repository, it works. The device
 receives `PC_to_RDR_Secure`, answers it from a button press, and macOS completes
 the signature — 483 ms end to end, one press.
 
@@ -447,7 +447,7 @@ Needs ESP-IDF v5.3.x (v5.3.4 verified).
 
 ```sh
 source ~/esp/esp-idf/export.sh
-cd firmware/simple
+cd simple
 idf.py set-target esp32s3
 idf.py build
 idf.py -p /dev/cu.usbmodem101 flash
@@ -457,7 +457,7 @@ Boards with two USB ports label them **COM** (UART bridge — flashing and logs)
 and **USB** (native — where the smart card appears). Flash over either, but the
 card only enumerates on the native port. With both connected you get logs and
 the card at once; with only the native port connected, use
-`./tools/provision.py monitor` for diagnostics.
+`./provision.py monitor` for diagnostics.
 
 A wrong-port symptom worth recognising: `system_profiler SPSmartCardsDataType`
 shows an empty `Readers:` list, and the serial port name does not change after
@@ -465,7 +465,7 @@ the firmware boots.
 
 ## Give it an identity
 
-Two ways, and the device accepts either. `tools/provision.py` is stdlib-only —
+Two ways, and the device accepts either. `./provision.py` is stdlib-only —
 no pip install, no venv.
 
 ### Compiled in — the quick way
@@ -473,8 +473,8 @@ no pip install, no venv.
 Keys are baked into the firmware image, so a flash is all it takes:
 
 ```sh
-./tools/provision.py gen-secrets     # writes firmware/simple/main/secrets.h
-cd firmware/simple && idf.py build && idf.py -p /dev/cu.usbmodemXXX flash
+./provision.py gen-secrets     # writes simple/main/secrets.h
+cd simple && idf.py build && idf.py -p /dev/cu.usbmodemXXX flash
 ```
 
 `gen-secrets` generates the RSA-2048 keypairs and writes them as correctly
@@ -489,7 +489,7 @@ device flashed from that image shares one identity.
 ### Provisioned over the console — per device
 
 ```sh
-./tools/provision.py provision
+./provision.py provision
 ```
 
 Generates keys on your Mac and pushes them over the CDC console into the
@@ -503,9 +503,9 @@ falls back to the compiled keys.
 ### Then pair it
 
 ```sh
-./tools/provision.py ports        # find the device
-./tools/provision.py status       # what does it know?
-./tools/provision.py pair         # link it to your macOS account
+./provision.py ports        # find the device
+./provision.py status       # what does it know?
+./provision.py pair         # link it to your macOS account
 ```
 
 macOS usually offers to pair on its own as soon as the card is inserted — the
@@ -520,7 +520,7 @@ Then test it:
 sudo -k && sudo -v      # press the button when macOS asks for the PIN
 ```
 
-`./tools/provision.py monitor` prints device events live, which is the fastest
+`./provision.py monitor` prints device events live, which is the fastest
 way to tell whether a press registered.
 
 ## How it works
@@ -644,7 +644,7 @@ anything. In short, and bluntly:
 ## Layout
 
 ```
-firmware/simple/       ESP-IDF project — button-gated PIV smart card
+simple/       ESP-IDF project — button-gated PIV smart card
   main/board_config.h  button pin, LED pin, brightness, dummy PIN
   main/main.c          presence task: press -> authorize -> type PIN
   main/button.c        debounced GPIO with claim/release arbitration
@@ -654,7 +654,7 @@ firmware/simple/       ESP-IDF project — button-gated PIV smart card
   main/usb_ccid.c      CCID class driver over TinyUSB
   main/usb_hid.c       HID keyboard, used only for the dummy PIN
   main/config_console.c  provisioning console on CDC
-tools/provision.py     key generation, provisioning, macOS pairing
+./provision.py     key generation, provisioning, macOS pairing
 reference/             upstream tinyTouch clone, for comparison
 UPSTREAM-REVIEW.md     what was found reading upstream, and what changed
 ```
