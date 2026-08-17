@@ -328,6 +328,7 @@ static uint32_t now_ms(void) {
 // what the revert in main.c turns on.
 static bool private_aid_selected;
 static uint32_t first_contact_ms;
+static uint32_t upgrade_requested_ms;
 
 bool piv_private_aid_selected(void) {
   return private_aid_selected;
@@ -337,6 +338,10 @@ uint32_t piv_first_contact_ms(void) {
   return first_contact_ms;
 }
 
+uint32_t piv_upgrade_requested_ms(void) {
+  return upgrade_requested_ms;
+}
+
 static bool handle_select(const uint8_t *apdu, size_t apdu_len, uint8_t *response,
                           size_t *response_len, size_t response_cap) {
   const uint8_t *data = NULL;
@@ -344,17 +349,24 @@ static bool handle_select(const uint8_t *apdu, size_t apdu_len, uint8_t *respons
   if (!read_lc_data(apdu, apdu_len, &data, &data_len)) {
     return append_sw(response, response_len, response_cap, 0x6700);
   }
-  // The two modes are mutually exclusive, and strictly so: each answers its own
-  // AID and refuses the other's.
+  // Pinpad mode answers only the private AID, which hides the card from Apple's
+  // pivtoken so our driver binds deterministically.
   //
-  // Answering both is the tempting mistake. It puts Apple's pivtoken and our
-  // driver in the running for the same card, and macOS binds exactly one driver
-  // per card chosen at insertion — a race we measured flipping between reboots.
-  // Worse, when both do bind, sc_auth files one of them under "not used for
-  // authentication" and that card silently stops authenticating.
+  // Standard mode answers the PIV AID *and* the private one — the latter purely
+  // as a probe. Nothing else on this system knows to ask for our private AID, so
+  // a select of it is proof that our driver is installed, and the device
+  // upgrades itself rather than needing an installer to tell it.
+  //
+  // Answering both is only safe because it does not last. A card that stays in
+  // that state leaves two drivers in the running, and macOS binds exactly one
+  // per card at insertion — a race we measured flipping between reboots, which
+  // also left sc_auth filing one identity under "not used for authentication"
+  // while that card silently stopped authenticating. Here the state resolves
+  // within a few hundred milliseconds: the probe is answered, the mode is
+  // persisted, and the device reboots into exclusive pinpad mode.
   bool pinpad_mode = settings_aid_mode() == AID_MODE_PINPAD;
 
-  bool private_aid = pinpad_mode && data_len == sizeof(PRIVATE_AID) &&
+  bool private_aid = data_len == sizeof(PRIVATE_AID) &&
                      memcmp(data, PRIVATE_AID, sizeof(PRIVATE_AID)) == 0;
   bool base_aid = !pinpad_mode && data_len == sizeof(PIV_AID) &&
                   memcmp(data, PIV_AID, sizeof(PIV_AID)) == 0;
@@ -366,7 +378,12 @@ static bool handle_select(const uint8_t *apdu, size_t apdu_len, uint8_t *respons
   }
   // A successful select of the private AID is proof our driver is installed and
   // bound: nothing else on the system knows to ask for it.
-  if (private_aid) private_aid_selected = true;
+  if (private_aid) {
+    private_aid_selected = true;
+    // Answered from standard mode, this was the probe. Note the moment; main.c
+    // finishes the response, then switches modes and reboots.
+    if (!pinpad_mode && upgrade_requested_ms == 0) upgrade_requested_ms = now_ms();
+  }
   const uint8_t fci[] = {
     0x61, 0x11,
     0x4f, 0x06, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00,

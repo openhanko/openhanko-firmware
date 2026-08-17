@@ -66,6 +66,33 @@ static void revert_if_unclaimed(void) {
   }
 }
 
+// Upgrades into pinpad mode once our driver announces itself.
+//
+// In standard mode the card answers the private AID as a probe. Only our driver
+// knows to ask for it, so a select is proof it is installed — and the device
+// switches itself rather than waiting for an installer to say so.
+//
+// The delay lets the response to that select reach the host before the card
+// disappears. It is kept short deliberately: until the reboot the card is
+// answering both AIDs, which leaves two drivers in the running, and that state
+// is exactly what must not persist.
+#define UPGRADE_SETTLE_MS 300
+
+static void upgrade_if_driver_present(void) {
+  if (settings_aid_mode() == AID_MODE_PINPAD) return;
+
+  uint32_t requested = piv_upgrade_requested_ms();
+  if (requested == 0) return;
+  if ((now_ms() - requested) < UPGRADE_SETTLE_MS) return;
+
+  printf("main: driver selected the private AID; upgrading to pinpad\n");
+  config_console_send_line("EVENT AID_UPGRADE pinpad");
+  if (settings_set_aid_mode(AID_MODE_PINPAD)) {
+    sleep_ms(50);
+    watchdog_reboot(0, 0, 0);
+  }
+}
+
 int main(void) {
   stdio_init_all();
   printf("\nsmart-card (rp2040) starting\n");
@@ -93,6 +120,7 @@ int main(void) {
   while (true) {
     tud_task();
     config_console_poll();
+    upgrade_if_driver_present();
     revert_if_unclaimed();
 
     status_led_update(usb_ccid_pin_pending());

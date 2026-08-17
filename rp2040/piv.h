@@ -54,6 +54,11 @@ bool piv_private_aid_selected(void);
 // has. A device on a charger, or in a hub with no host, stays at 0.
 uint32_t piv_first_contact_ms(void);
 
+// When the private AID was selected while in standard mode, or 0 if it has not
+// been. That select can only have come from our driver, so it is the signal to
+// upgrade into pinpad mode.
+uint32_t piv_upgrade_requested_ms(void);
+
 bool piv_handle_apdu(const uint8_t *apdu, size_t apdu_len,
                      uint8_t *response, size_t *response_len,
                      size_t response_cap);
