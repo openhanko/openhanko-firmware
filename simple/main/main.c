@@ -17,8 +17,7 @@ static const char *TAG = "main";
 // waiting for a press, dark otherwise.
 static status_led_mode_t led_mode(void) {
   if (piv_recent_signature()) return STATUS_LED_SOLID;
-  if (piv_challenge_active() || config_console_awaiting_press() ||
-      config_console_attention_active()) {
+  if (piv_challenge_active() || config_console_awaiting_press()) {
     return STATUS_LED_BREATHE;
   }
   return STATUS_LED_OFF;

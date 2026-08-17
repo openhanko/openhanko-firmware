@@ -21,13 +21,11 @@
 // command buffer only has to be a little larger than that.
 #define COMMAND_CAP 640
 #define CONFIG_WINDOW_MS (120u * 1000u)
-#define ATTENTION_WINDOW_MS (30u * 1000u)
 #define PRESS_WAIT_MS 15000u
 
 static char command[COMMAND_CAP];
 static size_t command_len;
 static uint32_t config_authorized_until;
-static uint32_t attention_until;
 static bool awaiting_press;
 
 static uint32_t now_ms(void) {
@@ -89,10 +87,6 @@ static bool demand_button_press(void) {
 
 bool config_console_awaiting_press(void) {
   return awaiting_press;
-}
-
-bool config_console_attention_active(void) {
-  return window_open(attention_until, ATTENTION_WINDOW_MS);
 }
 
 static bool config_authorized(void) {
@@ -178,21 +172,7 @@ static void handle_command(void) {
       send_line("ERR PROVISION_COMMIT");
     }
 
-  } else if (strncmp(command, "ATTENTION ", 10) == 0) {
-    // Driven by a macOS helper watching for the PIN prompt. The card itself
-    // never hears from macOS until a PIN is submitted, so this is the only way
-    // to signal before the user has already acted.
-    if (strcmp(command + 10, "ON") == 0) {
-      attention_until = now_ms() + ATTENTION_WINDOW_MS;
-      send_line("OK ATTENTION ON seconds=30");
-    } else if (strcmp(command + 10, "OFF") == 0) {
-      attention_until = 0;
-      send_line("OK ATTENTION OFF");
-    } else {
-      send_line("ERR ATTENTION");
-    }
-
-  } else if (strcmp(command, "BENCH") == 0) {
+    } else if (strcmp(command, "BENCH") == 0) {
     uint32_t ms = piv_benchmark_sign();
     if (ms) {
       snprintf(line, sizeof(line), "OK BENCH alg=%s sign_ms=%lu",
@@ -369,5 +349,4 @@ void config_console_poll(void) {
 void config_console_init(void) {
   command_len = 0;
   config_authorized_until = 0;
-  attention_until = 0;
 }

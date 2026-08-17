@@ -27,16 +27,12 @@ static const char *TAG = "console";
 #define PROVISION_CAP 2400
 #define CONFIG_WINDOW_US (120LL * 1000000LL)
 #define PRESS_WAIT_MS 15000
-// A host helper that dies mid-authentication must not leave the LED breathing
-// forever, so ATTENTION always expires on its own.
-#define ATTENTION_WINDOW_US (30LL * 1000000LL)
 
 static char command[COMMAND_CAP];
 static size_t command_len;
 static SemaphoreHandle_t cdc_write_mutex;
 static int64_t config_authorized_until;
 static volatile bool awaiting_press;
-static int64_t attention_until;
 
 typedef struct {
   uint8_t data[PROVISION_CAP];
@@ -238,21 +234,7 @@ static void handle_command(void) {
     if (!require_config_authorization()) return;
     send_line(commit_provisioning() ? "OK PROVISION_COMMIT" : "ERR PROVISION_COMMIT");
 
-  } else if (strncmp(command, "ATTENTION ", 10) == 0) {
-    // Driven by a macOS helper watching for the PIN prompt. The card itself
-    // never hears from macOS until a PIN is submitted, so this is the only way
-    // to light up before the user has already acted.
-    if (strcmp(command + 10, "ON") == 0) {
-      attention_until = esp_timer_get_time() + ATTENTION_WINDOW_US;
-      send_line("OK ATTENTION ON seconds=30");
-    } else if (strcmp(command + 10, "OFF") == 0) {
-      attention_until = 0;
-      send_line("OK ATTENTION OFF");
-    } else {
-      send_line("ERR ATTENTION");
-    }
-
-  } else if (strcmp(command, "BENCH") == 0) {
+    } else if (strcmp(command, "BENCH") == 0) {
     uint32_t ms = piv_benchmark_sign();
     if (ms) {
       snprintf(line, sizeof(line), "OK BENCH alg=%s sign_ms=%lu",
@@ -330,10 +312,6 @@ static void console_task(void *arg) {
 
 bool config_console_awaiting_press(void) {
   return awaiting_press;
-}
-
-bool config_console_attention_active(void) {
-  return esp_timer_get_time() < attention_until;
 }
 
 void config_console_start(void) {

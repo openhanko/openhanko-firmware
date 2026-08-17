@@ -581,73 +581,25 @@ macOS gets `6982`.
 
 ## The device cannot prompt you first
 
-A natural thing to want: the LED lights up when macOS needs you, so you know to
-reach for the button. On a wired PIV card this is impossible, and the device's
-own trace proves it.
-
-Sitting at a `sudo` PIN prompt for ten seconds without pressing, with
-`TRACE_CLEAR` run first, the card records nothing at all — no APDU, not even a
-CCID `GetSlotStatus`. The entire conversation begins 129 ms *after* the press:
+macOS says nothing to the card until a PIN has already been submitted.
+Measured with the trace ring cleared and a prompt left on screen for ten
+seconds: nothing arrived. The card is powered, then powered off again, with no
+APDU in between.
 
 ```
-68403 ms  EVENT BUTTON          <- the press
-68532 ms  CCID  IccPowerOn      <- macOS powers the card for the first time
-68533 ms  APDU  00 A4 04 00     <- SELECT PIV applet         9000
-68542 ms  APDU  00 20 00 80     <- VERIFY (the PIN)          9000
-69119 ms  APDU  00 87 07 9A     <- GENERAL AUTHENTICATE 9a   9000
+CCID 62 IccPowerOn
+CCID 63 IccPowerOff      7.5 s later, nothing asked
 ```
 
-macOS keeps the PIN prompt entirely host-side and does not touch the card until
-a PIN is submitted — and what submits it is this firmware's own HID typing,
-which the press triggers. The card is last in the chain by construction.
+So in driverless mode the device cannot light up to say "macOS wants you" — it
+has not been told. It can only acknowledge a touch after the fact. The
+breathing invitation exists solely in pinpad mode, where the driver sends
+`PC_to_RDR_Secure` and the device therefore knows.
 
-Reproduce it with `TRACE_CLEAR`, then `sudo -k && sudo -v` from a real terminal
-(the prompt needs a TTY), then `TRACE`.
-
-So the LED can only ever confirm, not prompt:
-
-- solid for a moment after a signature completes
-- breathing when a slot 9a signature is refused for want of a press, which is
-  the login-window case where macOS asks before you have pressed
-
-Prompting *before* you act requires a macOS helper, which is what
-`tools/attention_agent.py` is.
-
-### The optional attention agent
-
-It watches the unified log for Apple's PAM smart-card module and drives the
-firmware's `ATTENTION` command. Measured on a real `sudo`:
-
-```
-20:44:31.826  sudo  pam_sm_authenticate()                        <- auth begins
-20:44:31.829  sudo  SmartCard - using 0 as agent uid             <- +3 ms, LED on
-20:44:33.807  sudo  SmartCard - Smartcard verification result 0  <- +2.0 s, LED off
-```
-
-Three milliseconds of latency, and roughly two seconds of otherwise-dead time
-where the LED can ask for a press.
-
-```sh
-./tools/attention_agent.py --check    # watch and print, no device needed
-./tools/attention_agent.py            # run it
-```
-
-For a permanent install, edit the paths in
-`tools/launchd/dev.smartcard.attention.plist` and load it as a LaunchAgent.
-
-**It is optional on purpose, and the device is complete without it.** Two things
-to weigh before depending on it:
-
-- It matches Apple's **debug log strings**, which are not API and can change
-  between macOS releases. `--check` exists so a mismatch is visible rather than
-  silent; the patterns are constants at the top of the file.
-- It deliberately does **not** touch the PAM stack. A custom PAM module in
-  `/etc/pam.d/sudo_local` would be a more precise and more stable hook, but a
-  faulty module there can cost you `sudo`. Losing the LED is a much better
-  failure mode than losing authentication.
-
-The `ATTENTION` window self-expires after 30 s, so an agent that dies mid
-authentication cannot leave the LED breathing.
+An earlier version worked around this with a host-side agent that watched for
+the prompt and sent an `ATTENTION` command over the console. It worked, and it
+was deleted: it needed a LaunchAgent running permanently to light an LED, and
+the pinpad driver made it redundant by telling the device directly.
 
 ## A warning about authentication paths
 

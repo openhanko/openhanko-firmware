@@ -14,6 +14,3 @@ void config_console_send_line(const char *line);
 // True while a console command is asking the operator to press the button.
 bool config_console_awaiting_press(void);
 
-// True while a host helper has asked the device to attract attention, via
-// ATTENTION ON. Expires by itself.
-bool config_console_attention_active(void);
