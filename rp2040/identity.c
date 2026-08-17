@@ -117,7 +117,12 @@ static bool generate_slot(storage_slot_t cert_slot, storage_slot_t key_slot,
   if (cert_slot == STORAGE_CERT_9A) {
     snprintf(common_name, sizeof(common_name), "%s", name);
   }
-  snprintf(subject, sizeof(subject), "CN=%s %s", name, label);
+  // No role suffix. macOS already wraps this in "Certificate For PIV
+  // Authentication (…)", so appending "authentication" says it twice. The two
+  // slots hold different keys and therefore get different fingerprints, so the
+  // names stay distinct without one.
+  (void)label;
+  snprintf(subject, sizeof(subject), "CN=%s", name);
 
   // Self-signed: subject and issuer are the same key. Nothing verifies a chain
   // here — macOS pairs against the public key itself, so a CA would be

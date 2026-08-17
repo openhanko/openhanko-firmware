@@ -1,5 +1,7 @@
 #include "usb_descriptors.h"
 
+#include "board_config.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -115,8 +117,10 @@ void smart_card_init_serial(void) {
 
 static const char *string_descriptors[] = {
   NULL,               // 0: language, handled specially below
-  "smart-card-poc",   // 1: manufacturer
-  "smart-card-poc",   // 2: product
+  // macOS builds its reader name by concatenating these two, so identical
+  // strings read as "OpenHanko OpenHanko" in the pairing dialog.
+  DEVICE_NAME,        // 1: manufacturer
+  "Smart Card",       // 2: product
   serial_string,      // 3: serial
 };
 
