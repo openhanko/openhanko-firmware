@@ -75,25 +75,43 @@ static void handle_press(void) {
 // The light is the entire interface. With no screen, an accelerating blink is
 // the only warning available that something irreversible is approaching, and
 // going solid is the only way to say "now, if you mean it".
-#define RESET_ARM_MS 10000
+#define RESET_ARM_MS 6000
 
 static void factory_reset_gesture(void) {
   if (!button_held_at_boot()) return;
 
   uint32_t started = now_ms();
+  uint32_t last = started;
+  uint32_t phase = 0;      // milliseconds into the current half-cycle
+  bool lit = false;
   bool armed = false;
 
   while (button_is_down()) {
-    uint32_t held = now_ms() - started;
+    uint32_t now = now_ms();
+    uint32_t step = now - last;
+    last = now;
+    uint32_t held = now - started;
+
     if (held >= RESET_ARM_MS) {
       armed = true;
       status_led_update(STATUS_LED_ARMED);
-    } else {
-      // Blink period falls from 500 ms to 100 ms as the deadline approaches.
-      uint32_t period = 500 - (held * 400) / RESET_ARM_MS;
-      bool lit = (now_ms() / (period / 2)) % 2 == 0;
-      status_led_update(lit ? STATUS_LED_ARMED : STATUS_LED_OFF);
+      sleep_ms(5);
+      continue;
     }
+
+    // Half-period falls from 250 ms to 50 ms as the deadline approaches.
+    //
+    // Accumulated rather than derived from the clock. Dividing absolute time by
+    // a shrinking period moves the phase discontinuously, so the light stutters
+    // instead of accelerating and never reads as settling — which made the
+    // moment it went solid impossible to judge.
+    uint32_t half = (500 - (held * 400) / RESET_ARM_MS) / 2;
+    phase += step;
+    if (phase >= half) {
+      phase = 0;
+      lit = !lit;
+    }
+    status_led_update(lit ? STATUS_LED_ARMED : STATUS_LED_OFF);
     sleep_ms(5);
   }
 
