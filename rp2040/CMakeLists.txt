@@ -26,6 +26,7 @@ add_executable(smart_card_rp2040
   config_console.c
   piv.c
   status_led.c
+  settings.c
   storage.c
   trace.c
   usb_ccid.c

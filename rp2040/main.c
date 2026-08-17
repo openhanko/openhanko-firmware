@@ -3,8 +3,10 @@
 #include "board_config.h"
 #include "button.h"
 #include "config_console.h"
+#include "hardware/watchdog.h"
 #include "pico/stdlib.h"
 #include "piv.h"
+#include "settings.h"
 #include "status_led.h"
 #include "storage.h"
 #include "trace.h"
@@ -37,11 +39,48 @@ static void handle_press(void) {
   }
 }
 
+// Gives up on pinpad mode when nothing claims the card.
+//
+// Exactly one driver owns a card and macOS picks it at insertion from the AID
+// alone, so a device in pinpad mode on a Mac without the driver is simply inert
+// — no token binds and nothing explains why. Rather than strand the user, the
+// card notices that its private AID went unselected and returns to the standard
+// AID, where Apple's pivtoken will bind and the device works unaided.
+//
+// The reboot is the point: the AID is answered during enumeration, so the host
+// has to be made to enumerate again. tud_disconnect()/tud_connect() proved
+// unreliable here, and a watchdog reset is unambiguous.
+static void revert_if_unclaimed(void) {
+  if (settings_aid_mode() != AID_MODE_PINPAD) return;
+
+  uint32_t contacted = piv_first_contact_ms();
+  if (contacted == 0) return;              // no host yet: a charger, or still enumerating
+  if (piv_private_aid_selected()) return;  // our driver is here
+  if ((now_ms() - contacted) < AID_REVERT_TIMEOUT_MS) return;
+
+  printf("main: no driver claimed the private AID; reverting to standard\n");
+  config_console_send_line("EVENT AID_REVERT standard");
+  if (settings_set_aid_mode(AID_MODE_STANDARD)) {
+    sleep_ms(50);  // let the console line reach the host
+    watchdog_reboot(0, 0, 0);
+  }
+}
+
 int main(void) {
   stdio_init_all();
   printf("\nsmart-card (rp2040) starting\n");
 
   button_init();
+  settings_init();
+
+  // Escape hatch. A device that has been switched to pinpad mode and then moved
+  // to a Mac without the driver recovers on its own, but only once a host talks
+  // to it. Holding the button through power-up forces standard mode
+  // unconditionally, which covers the cases automation cannot reach.
+  if (button_held_at_boot()) {
+    printf("main: button held at boot; forcing the standard AID\n");
+    settings_set_aid_mode(AID_MODE_STANDARD);
+  }
   status_led_init();
   storage_init();
   piv_init();
@@ -54,6 +93,7 @@ int main(void) {
   while (true) {
     tud_task();
     config_console_poll();
+    revert_if_unclaimed();
 
     status_led_update(usb_ccid_pin_pending());
 

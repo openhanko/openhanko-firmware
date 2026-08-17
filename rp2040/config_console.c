@@ -9,6 +9,7 @@
 #include "pico/bootrom.h"
 #include "pico/stdlib.h"
 #include "piv.h"
+#include "settings.h"
 #include "storage.h"
 #include "trace.h"
 #include "tusb.h"
@@ -128,12 +129,14 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     snprintf(line, sizeof(line),
-             "OK STATUS firmware=rp2040 presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s",
+             "OK STATUS firmware=rp2040 presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s",
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
              piv_pairing_mode_active() ? "on" : "off",
-             config_authorized() ? "unlocked" : "locked");
+             config_authorized() ? "unlocked" : "locked",
+             settings_aid_mode_name(settings_aid_mode()),
+             piv_private_aid_selected() ? "yes" : "no");
     send_line(line);
 
   } else if (strcmp(command, "CONFIG_UNLOCK") == 0) {
@@ -225,6 +228,45 @@ static void handle_command(void) {
     tud_disconnect();
     sleep_ms(500);
     tud_connect();
+
+  } else if (strncmp(command, "AID_MODE ", 9) == 0) {
+    // Switches which application the card answers, and therefore which driver
+    // macOS binds. Exactly one driver owns a card and macOS chooses it at
+    // insertion from the AID alone, so this is the only way to move between the
+    // driverless and pinpad workflows.
+    //
+    // The reboot is not optional: the AID is answered during enumeration, so
+    // the host has to be made to enumerate again.
+    //
+    // It costs a button press like any other reconfiguration. Otherwise host
+    // software alone could move the device into a mode where a different driver
+    // handles its authentication, with nothing physical to notice it.
+    aid_mode_t wanted;
+    if (strcmp(command + 9, "standard") == 0) {
+      wanted = AID_MODE_STANDARD;
+    } else if (strcmp(command + 9, "pinpad") == 0) {
+      wanted = AID_MODE_PINPAD;
+    } else {
+      send_line("ERR AID_MODE usage=standard|pinpad");
+      return;
+    }
+
+    if (wanted == settings_aid_mode()) {
+      snprintf(line, sizeof(line), "OK AID_MODE %s unchanged",
+               settings_aid_mode_name(wanted));
+      send_line(line);
+      return;
+    }
+    if (!demand_button_press()) return;
+    if (!settings_set_aid_mode(wanted)) {
+      send_line("ERR AID_MODE write_failed");
+      return;
+    }
+    snprintf(line, sizeof(line), "OK AID_MODE %s rebooting",
+             settings_aid_mode_name(wanted));
+    send_line(line);
+    sleep_ms(100);
+    watchdog_reboot(0, 0, 0);
 
   } else if (strcmp(command, "REBOOT") == 0) {
     send_line("OK REBOOT");

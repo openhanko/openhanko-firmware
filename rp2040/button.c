@@ -16,6 +16,7 @@ static uint32_t candidate_since;
 static uint32_t last_press;
 static uint32_t last_sample;
 static bool last_level;
+static bool held_at_boot;
 
 static uint32_t now_ms(void) {
   return to_ms_since_boot(get_absolute_time());
@@ -82,8 +83,13 @@ void button_init(void) {
 
   last_sample = 0;
   stable_down = raw_down();
+  held_at_boot = stable_down;
   candidate_down = stable_down;
   candidate_since = now_ms();
+}
+
+bool button_held_at_boot(void) {
+  return held_at_boot;
 }
 
 bool button_pressed(void) {

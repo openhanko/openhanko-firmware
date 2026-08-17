@@ -46,6 +46,14 @@ bool piv_pairing_mode_active(void);
 // whether the part is fast enough to be pleasant.
 uint32_t piv_benchmark_sign(void);
 
+// True once our driver has selected the private AID, which nothing else on the
+// system knows to ask for — so it is proof the driver is installed and bound.
+bool piv_private_aid_selected(void);
+
+// Milliseconds since boot when the host first sent any APDU, or 0 if it never
+// has. A device on a charger, or in a hub with no host, stays at 0.
+uint32_t piv_first_contact_ms(void);
+
 bool piv_handle_apdu(const uint8_t *apdu, size_t apdu_len,
                      uint8_t *response, size_t *response_len,
                      size_t response_cap);

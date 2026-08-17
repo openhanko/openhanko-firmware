@@ -11,6 +11,7 @@
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
 #include "board_config.h"
+#include "settings.h"
 #include "storage.h"
 #include "trace.h"
 
@@ -322,6 +323,20 @@ static uint32_t now_ms(void) {
   return to_ms_since_boot(get_absolute_time());
 }
 
+// Set once our driver claims the card, and once the host first says anything
+// at all. Together they answer "is anybody there, and is it us?" — which is
+// what the revert in main.c turns on.
+static bool private_aid_selected;
+static uint32_t first_contact_ms;
+
+bool piv_private_aid_selected(void) {
+  return private_aid_selected;
+}
+
+uint32_t piv_first_contact_ms(void) {
+  return first_contact_ms;
+}
+
 static bool handle_select(const uint8_t *apdu, size_t apdu_len, uint8_t *response,
                           size_t *response_len, size_t response_cap) {
   const uint8_t *data = NULL;
@@ -329,21 +344,29 @@ static bool handle_select(const uint8_t *apdu, size_t apdu_len, uint8_t *respons
   if (!read_lc_data(apdu, apdu_len, &data, &data_len)) {
     return append_sw(response, response_len, response_cap, 0x6700);
   }
-  bool private_aid = data_len == sizeof(PRIVATE_AID) &&
+  // The two modes are mutually exclusive, and strictly so: each answers its own
+  // AID and refuses the other's.
+  //
+  // Answering both is the tempting mistake. It puts Apple's pivtoken and our
+  // driver in the running for the same card, and macOS binds exactly one driver
+  // per card chosen at insertion — a race we measured flipping between reboots.
+  // Worse, when both do bind, sc_auth files one of them under "not used for
+  // authentication" and that card silently stops authenticating.
+  bool pinpad_mode = settings_aid_mode() == AID_MODE_PINPAD;
+
+  bool private_aid = pinpad_mode && data_len == sizeof(PRIVATE_AID) &&
                      memcmp(data, PRIVATE_AID, sizeof(PRIVATE_AID)) == 0;
-#if PIV_ANSWER_STANDARD_AID
-  bool base_aid = data_len == sizeof(PIV_AID) && memcmp(data, PIV_AID, sizeof(PIV_AID)) == 0;
-  bool versioned_aid = data_len == sizeof(PIV_AID_VERSIONED) &&
+  bool base_aid = !pinpad_mode && data_len == sizeof(PIV_AID) &&
+                  memcmp(data, PIV_AID, sizeof(PIV_AID)) == 0;
+  bool versioned_aid = !pinpad_mode && data_len == sizeof(PIV_AID_VERSIONED) &&
                        memcmp(data, PIV_AID_VERSIONED, sizeof(PIV_AID_VERSIONED)) == 0;
-#else
-  bool base_aid = false;
-  bool versioned_aid = false;
-  (void)PIV_AID;
-  (void)PIV_AID_VERSIONED;
-#endif
+
   if (!base_aid && !versioned_aid && !private_aid) {
     return append_sw(response, response_len, response_cap, 0x6a82);
   }
+  // A successful select of the private AID is proof our driver is installed and
+  // bound: nothing else on the system knows to ask for it.
+  if (private_aid) private_aid_selected = true;
   const uint8_t fci[] = {
     0x61, 0x11,
     0x4f, 0x06, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00,
@@ -678,6 +701,9 @@ void piv_reload_keys(void) {
 bool piv_handle_apdu(const uint8_t *apdu, size_t apdu_len,
                      uint8_t *response, size_t *response_len,
                      size_t response_cap) {
+  // Any APDU means a host is talking to the card, whoever it turns out to be.
+  if (first_contact_ms == 0) first_contact_ms = now_ms();
+
   *response_len = 0;
   if (apdu_len < 4) {
     return append_sw(response, response_len, response_cap, 0x6700);
