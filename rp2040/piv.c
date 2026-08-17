@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "mbedtls/base64.h"
+#include "mbedtls/ecdh.h"
+#include "mbedtls/ecp.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/rsa.h"
 #include "mbedtls/sha256.h"
@@ -524,6 +526,24 @@ bool piv_pairing_mode_active(void) {
   return window_open(pairing_mode_until, PAIRING_MODE_WINDOW_MS);
 }
 
+// Wraps a payload in the dynamic authentication template PIV answers with:
+// 7C L { 82 L <payload> }. Both a signature and an ECDH shared secret come back
+// this way, so the two paths share it rather than each building their own.
+static bool respond_dynamic_auth(const uint8_t *payload, size_t payload_len,
+                                 uint8_t *response, size_t *response_len,
+                                 size_t response_cap) {
+  size_t off = 0;
+  response[off++] = 0x7c;
+  off += encode_len(response + off, 1 + encoded_len_size(payload_len) + payload_len);
+  response[off++] = 0x82;
+  off += encode_len(response + off, payload_len);
+  if (off + payload_len + 2 > response_cap) return false;
+  memcpy(response + off, payload, payload_len);
+  off += payload_len;
+  *response_len = off;
+  return append_sw(response, response_len, response_cap, 0x9000);
+}
+
 static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
                                         uint8_t *response, size_t *response_len,
                                         size_t response_cap) {
@@ -549,9 +569,18 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
     return append_sw(response, response_len, response_cap, 0x6a80);
   }
 
+  // Two different operations share this command. Tag 0x81 carries a challenge
+  // to sign; tag 0x85 carries the other party's public point for key agreement,
+  // which is what macOS uses to wrap the login keychain unlock key to slot 9D.
   const uint8_t *challenge = NULL;
   size_t challenge_len = 0;
-  if (!tlv_find_one(data + outer_off, outer_len, 0x81, &challenge, &challenge_len)) {
+  const uint8_t *peer_point = NULL;
+  size_t peer_point_len = 0;
+  bool key_agreement =
+      tlv_find_one(data + outer_off, outer_len, 0x85, &peer_point, &peer_point_len);
+
+  if (!key_agreement &&
+      !tlv_find_one(data + outer_off, outer_len, 0x81, &challenge, &challenge_len)) {
     return append_sw(response, response_len, response_cap, 0x6a80);
   }
   mbedtls_pk_context *key = apdu[3] == 0x9d ? &key_mgmt_key : &auth_key;
@@ -568,6 +597,50 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
     LOG("slot %02x refused: algorithm %02x does not match the loaded key",
         apdu[3], algorithm);
     return append_sw(response, response_len, response_cap, 0x6a86);
+  }
+
+  if (key_agreement) {
+    // ECDH on P-256: the shared secret is the X coordinate of peer * d.
+    //
+    // Not presence-gated, and deliberately. This runs while macOS is opening
+    // the login keychain immediately after a smart-card login the user has
+    // already authorised with a press; demanding a second one there would
+    // simply look broken.
+    if (key_type != MBEDTLS_PK_ECKEY) {
+      return append_sw(response, response_len, response_cap, 0x6a86);
+    }
+
+    mbedtls_ecp_group group;
+    mbedtls_mpi private_scalar, shared;
+    mbedtls_ecp_point public_point, peer;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_mpi_init(&private_scalar);
+    mbedtls_mpi_init(&shared);
+    mbedtls_ecp_point_init(&public_point);
+    mbedtls_ecp_point_init(&peer);
+
+    uint8_t secret[32];
+    int rc = mbedtls_ecp_export(mbedtls_pk_ec(*key), &group, &private_scalar, &public_point);
+    if (rc == 0) rc = mbedtls_ecp_point_read_binary(&group, &peer, peer_point, peer_point_len);
+    if (rc == 0) {
+      rc = mbedtls_ecdh_compute_shared(&group, &shared, &peer, &private_scalar,
+                                       piv_rng, NULL);
+    }
+    if (rc == 0) rc = mbedtls_mpi_write_binary(&shared, secret, sizeof(secret));
+
+    mbedtls_ecp_point_free(&peer);
+    mbedtls_ecp_point_free(&public_point);
+    mbedtls_mpi_free(&shared);
+    mbedtls_mpi_free(&private_scalar);
+    mbedtls_ecp_group_free(&group);
+
+    if (rc != 0) {
+      LOG("slot %02x key agreement failed: -0x%04x", apdu[3], (unsigned)(-rc));
+      return append_sw(response, response_len, response_cap, 0x6f00);
+    }
+    LOG("slot %02x key agreement ok", apdu[3]);
+    return respond_dynamic_auth(secret, sizeof(secret), response, response_len,
+                                response_cap);
   }
 
   // Slot 9a is what macOS authenticates logins and sudo with, so each use of it
@@ -607,24 +680,31 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
     rc = mbedtls_pk_sign(key, MBEDTLS_MD_SHA256, hash, sizeof(hash),
                          sig, sizeof(sig), &sig_len, piv_rng, NULL);
   }
-  pin_verified_until = 0;
+  // The PIN verification is deliberately *not* consumed here.
+  //
+  // It used to be, as belt-and-braces on top of the per-signature button press.
+  // That broke the login keychain: macOS signs with 9A to authenticate and then
+  // immediately asks 9D to unwrap the keychain unlock key, and the second
+  // request arrived to a card that had just forgotten its PIN — 6982, and the
+  // account password demanded anyway. Traced:
+  //
+  //   ins=87 p1=11 p2=9a sw=9000    the login signature
+  //   ins=87 p1=11 p2=9d sw=6982    the keychain unlock, refused
+  //
+  // Nothing is given away by leaving it. Slot 9A still costs a button press for
+  // every single use, which is the real gate; the PIN is theatre this applet
+  // accepts from anyone. The window closes on its own.
   if (rc != 0) {
     LOG("sign failed: -0x%x", -rc);
     return append_sw(response, response_len, response_cap, 0x6f00);
   }
 
-  size_t off = 0;
-  response[off++] = 0x7c;
-  off += encode_len(response + off, 1 + encoded_len_size(sig_len) + sig_len);
-  response[off++] = 0x82;
-  off += encode_len(response + off, sig_len);
-  if (off + sig_len + 2 > response_cap) return false;
-  memcpy(response + off, sig, sig_len);
-  off += sig_len;
-  *response_len = off;
+  if (!respond_dynamic_auth(sig, sig_len, response, response_len, response_cap)) {
+    return false;
+  }
   signature_until = now_ms() + SIGNATURE_ACK_MS;
   LOG("signed with slot %02x", apdu[3]);
-  return append_sw(response, response_len, response_cap, 0x9000);
+  return true;
 }
 
 void piv_init(void) {

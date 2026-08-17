@@ -42,6 +42,10 @@
 // PIV algorithm identifier 0x11 means P-256 specifically.
 #define MBEDTLS_ECP_C
 #define MBEDTLS_ECDSA_C
+// Key agreement on slot 9D. macOS wraps the login keychain unlock key to a PIV
+// key-management key, so without this a smart-card login still demands the
+// account password afterwards to open the keychain.
+#define MBEDTLS_ECDH_C
 #define MBEDTLS_ECP_DP_SECP256R1_ENABLED
 
 // RFC 6979. The RP2040 has no hardware TRNG, and a predictable ECDSA nonce
