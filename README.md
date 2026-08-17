@@ -443,6 +443,18 @@ showing `6f00` where a missing button press would have given `6982`.
 
 ## Build and flash
 
+A fresh clone needs the Pico SDK on hand — the build directory used to carry
+this in its cache, so it only surfaces on a clean checkout:
+
+```
+export PICO_SDK_PATH=~/.pico-sdk/sdk/2.2.0
+cd rp2040 && cmake -S . -B build && cmake --build build
+```
+
+Then double-tap RESET and copy `build/smart_card_rp2040.uf2` onto the volume
+that appears.
+
+
 Needs ESP-IDF v5.3.x (v5.3.4 verified).
 
 ```sh
