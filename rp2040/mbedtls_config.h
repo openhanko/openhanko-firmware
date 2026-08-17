@@ -17,6 +17,11 @@
 
 #define MBEDTLS_MD_C
 #define MBEDTLS_SHA256_C
+// SHA-1 only to fingerprint public keys for the device label. macOS derives
+// kSecAttrApplicationLabel — the hash sc_auth pairs against — the same way, so
+// the name on the device matches the entry in `sc_auth list`. Nothing is signed
+// with it.
+#define MBEDTLS_SHA1_C
 #define MBEDTLS_SHA224_C
 #define MBEDTLS_BASE64_C
 
@@ -45,6 +50,12 @@
 // not optional on this part. Needs HMAC_DRBG.
 #define MBEDTLS_ECDSA_DETERMINISTIC
 #define MBEDTLS_HMAC_DRBG_C
+
+// Writing a self-signed certificate on the device, so the private key never
+// has to exist on a workshop machine. See identity.c.
+#define MBEDTLS_X509_CREATE_C
+#define MBEDTLS_X509_CRT_WRITE_C
+#define MBEDTLS_PEM_WRITE_C
 
 #define MBEDTLS_ERROR_C
 

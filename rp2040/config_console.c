@@ -8,6 +8,7 @@
 #include "hardware/watchdog.h"
 #include "pico/bootrom.h"
 #include "pico/stdlib.h"
+#include "identity.h"
 #include "piv.h"
 #include "settings.h"
 #include "storage.h"
@@ -213,6 +214,21 @@ static void handle_command(void) {
   } else if (strcmp(command, "PAIRING_MODE_OFF") == 0) {
     piv_set_pairing_mode(false);
     send_line("OK PAIRING_MODE_OFF");
+
+  } else if (strcmp(command, "GENERATE_IDENTITY") == 0) {
+    // Replaces the identity with a freshly generated one whose private key has
+    // never left this chip. Destroys the old one, so anything paired to it
+    // stops working until re-paired — hence the button press.
+    if (!require_config_authorization()) return;
+    if (!demand_button_press()) return;
+    if (identity_generate()) {
+      piv_reload_keys();
+      snprintf(line, sizeof(line), "OK GENERATE_IDENTITY cn=\"%s\"",
+               identity_common_name());
+      send_line(line);
+    } else {
+      send_line("ERR GENERATE_IDENTITY");
+    }
 
   } else if (strcmp(command, "FACTORY_RESET") == 0) {
     if (!demand_button_press()) return;

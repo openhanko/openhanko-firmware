@@ -38,6 +38,12 @@
 // with nothing installed. Pinpad is an opt-in upgrade the driver's installer
 // switches the device into, and which the device abandons on its own if
 // nothing claims it.
+// Shown by macOS in its PIN prompt, as "Certificate For PIV Authentication
+// (<this> <serial> authentication)". Keep it short: the wrapper text is
+// Apple's and cannot be changed, so everything inside the parentheses is the
+// only part that is ours.
+#define DEVICE_NAME "OpenHanko"
+
 #define PIV_DEFAULT_AID_MODE 0  /* AID_MODE_STANDARD */
 
 // How long after the host first talks to the card to wait for our driver to

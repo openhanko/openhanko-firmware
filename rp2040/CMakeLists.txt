@@ -24,6 +24,7 @@ add_executable(smart_card_rp2040
   main.c
   button.c
   config_console.c
+  identity.c
   piv.c
   status_led.c
   settings.c
@@ -53,6 +54,10 @@ target_link_libraries(smart_card_rp2040
   tinyusb_device
   tinyusb_board
   pico_mbedtls_crypto
+  # X.509 writing, for the self-signed certificate generated in identity.c.
+  # The SDK splits mbedTLS into crypto/x509/tls targets and pico_mbedtls_crypto
+  # alone has no certificate writer, which shows up only at link time.
+  pico_mbedtls_x509
   pico_mbedtls_headers
 )
 

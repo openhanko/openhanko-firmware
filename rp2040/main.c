@@ -3,6 +3,7 @@
 #include "board_config.h"
 #include "button.h"
 #include "config_console.h"
+#include "identity.h"
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
 #include "piv.h"
@@ -135,6 +136,16 @@ int main(void) {
   status_led_init();
   storage_init();
   piv_init();
+
+  // A device that has never been given an identity makes its own, so a unit can
+  // be flashed and boxed without any key material ever existing outside it.
+  //
+  // Only when there is nothing at all: a provisioned identity in flash, or one
+  // compiled into secrets.h, is left alone. Otherwise every developer build
+  // would silently replace the identity their Mac is already paired with.
+  if (!piv_has_identity()) {
+    if (identity_generate()) piv_reload_keys();
+  }
   config_console_init();
   usb_ccid_start(piv_handle_apdu);
 
