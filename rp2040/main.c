@@ -123,7 +123,12 @@ static void factory_reset_gesture(void) {
 static void revert_if_unclaimed(void) {
   if (settings_aid_mode() != AID_MODE_PINPAD) return;
 
-  uint32_t contacted = piv_first_contact_ms();
+  // Card power-on, not the first APDU. A Mac with no driver for this card
+  // powers it and powers it off again without asking anything, so an
+  // APDU-based trigger leaves the device stranded in pinpad mode precisely
+  // where it most needs to recover. Measured: IccPowerOn, then IccPowerOff
+  // 7.5 s later, and not one APDU in between.
+  uint32_t contacted = usb_ccid_powered_ms();
   if (contacted == 0) return;              // no host yet: a charger, or still enumerating
   if (piv_private_aid_selected()) return;  // our driver is here
   if ((now_ms() - contacted) < AID_REVERT_TIMEOUT_MS) return;

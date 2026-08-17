@@ -18,6 +18,7 @@ static uint8_t rx_buf[CCID_BUF_SIZE];
 static uint8_t tx_buf[CCID_BUF_SIZE];
 static uint8_t rhport_active;
 static ccid_apdu_handler_t apdu_handler;
+static uint32_t powered_ms;
 
 // Outstanding PC_to_RDR_Secure request. The host is blocked on this until a
 // button press answers it, so it cannot be handled inline.
@@ -115,6 +116,7 @@ static void handle_message(uint8_t *msg, size_t msg_len) {
 
   switch (type) {
     case 0x62: {  // PC_to_RDR_IccPowerOn
+      if (powered_ms == 0) powered_ms = to_ms_since_boot(get_absolute_time());
       const uint8_t atr[] = {0x3b, 0x80, 0x01, 0x01};
       send_ccid(0x80, slot, seq, 0x00, 0x00, atr, sizeof(atr));
       break;
@@ -239,4 +241,8 @@ void usb_ccid_start(ccid_apdu_handler_t handler) {
   // usb_descriptors.c. Unlike esp_tinyusb there is no driver task: main() runs
   // tud_task() itself on the single cooperative loop.
   tusb_init();
+}
+
+uint32_t usb_ccid_powered_ms(void) {
+  return powered_ms;
 }

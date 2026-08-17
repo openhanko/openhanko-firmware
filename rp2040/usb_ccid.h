@@ -16,6 +16,14 @@ void usb_ccid_start(ccid_apdu_handler_t handler);
 // PC_to_RDR_Secure and then waits. Answering that means waiting for a button
 // press, which is far too long to sit inside the USB callback, so the reply is
 // deferred: the main loop drives these while the request is outstanding.
+// Milliseconds since boot when a host first powered the card, or 0 if none has.
+//
+// This, rather than the first APDU, is what proves a host is present. A Mac
+// with no driver willing to claim the card powers it and powers it off again
+// without sending anything at all — so waiting for an APDU means waiting
+// forever, on exactly the machine where the device most needs to notice.
+uint32_t usb_ccid_powered_ms(void);
+
 bool usb_ccid_pin_pending(void);
 
 // Keeps the host waiting with CCID time extensions, and gives up on timeout.
