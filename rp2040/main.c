@@ -3,6 +3,7 @@
 #include "board_config.h"
 #include "button.h"
 #include "config_console.h"
+#include "fingerprint.h"
 #include "identity.h"
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
@@ -127,6 +128,50 @@ static void factory_reset_gesture(void) {
   watchdog_reboot(0, 0, 0);
 }
 
+// How often to ask the sensor whether a finger is present.
+//
+// Each poll is a UART round trip, and with no finger the module answers almost
+// at once, so this is cheap — but not free, and there is no reason to ask
+// hundreds of times a second.
+#define FINGERPRINT_POLL_MS 200
+
+// Mirrors the indicator state onto the module's own LED ring.
+//
+// Only on change: every call is a UART exchange, and repainting a steady light
+// sixty times a second would flood the link the sensor also answers on.
+static void mirror_light(status_led_mode_t mode) {
+  static status_led_mode_t shown = (status_led_mode_t)-1;
+  if (!fingerprint_present() || mode == shown) return;
+  shown = mode;
+
+  switch (mode) {
+    case STATUS_LED_BREATHE: fingerprint_light(FP_LIGHT_BREATHE, FP_LED_BLUE, 0); break;
+    case STATUS_LED_CONFIRM: fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 3); break;
+    case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
+    default:                 fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0); break;
+  }
+}
+
+// A recognised fingerprint authorises exactly what a button press does.
+//
+// The sensor replaces the button as the presence gesture without changing what
+// presence *means*, so everything downstream — the signing window, the typed
+// PIN, the acknowledgement — is untouched.
+static void poll_fingerprint(void) {
+  if (!fingerprint_present()) return;
+
+  static uint32_t last_poll;
+  if ((now_ms() - last_poll) < FINGERPRINT_POLL_MS) return;
+  last_poll = now_ms();
+
+  uint16_t slot = 0, score = 0;
+  if (!fingerprint_verify(&slot, &score)) return;
+
+  printf("main: fingerprint matched slot %u (score %u)\n", slot, score);
+  config_console_send_line("EVENT FINGERPRINT");
+  handle_press();
+}
+
 // Gives up on pinpad mode when nothing claims the card.
 //
 // Exactly one driver owns a card and macOS picks it at insertion from the AID
@@ -192,6 +237,7 @@ int main(void) {
 
   button_init();
   settings_init();
+  fingerprint_init();
 
   storage_init();
   status_led_init();
@@ -219,7 +265,10 @@ int main(void) {
     upgrade_if_driver_present();
     revert_if_unclaimed();
 
-    status_led_update(led_mode());
+    status_led_mode_t indicator = led_mode();
+    status_led_update(indicator);
+    mirror_light(indicator);
+    poll_fingerprint();
 
     if (usb_ccid_pin_pending()) {
       // The host is waiting on a pinpad PIN entry. Either the user presses now,

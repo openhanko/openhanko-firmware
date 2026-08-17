@@ -54,6 +54,18 @@
 // user sees the device work a moment after plugging in rather than not at all.
 #define AID_REVERT_TIMEOUT_MS 10000
 
+// HLK-ZW111 fingerprint module on UART1.
+//
+// GP4/GP5 are UART1's default pins and clear of the WS2812 on GP16 and the
+// button on GP10. Set FINGERPRINT_UART_TX to -1 to build without sensor
+// support at all; leaving it configured on a board with nothing attached is
+// also fine, since the module is detected at startup and its absence simply
+// leaves the button as the trigger.
+#define FINGERPRINT_UART_INSTANCE uart1
+#define FINGERPRINT_UART_TX 4
+#define FINGERPRINT_UART_RX 5
+#define FINGERPRINT_BAUD 57600
+
 // Addressable RGB indicator (WS2812) on GP16. Driven by PIO, since the protocol
 // needs sub-microsecond pulse widths the CPU cannot hit reliably alongside USB.
 // Set to -1 to disable.

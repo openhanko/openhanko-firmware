@@ -24,6 +24,7 @@ add_executable(smart_card_rp2040
   main.c
   button.c
   config_console.c
+  fingerprint.c
   identity.c
   piv.c
   status_led.c
@@ -44,6 +45,7 @@ target_link_libraries(smart_card_rp2040
   pico_stdlib
   pico_unique_id
   pico_rand
+  hardware_uart
   hardware_flash
   hardware_watchdog
   hardware_pio

@@ -1,6 +1,7 @@
 #include "config_console.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "button.h"
@@ -8,6 +9,7 @@
 #include "hardware/watchdog.h"
 #include "pico/bootrom.h"
 #include "pico/stdlib.h"
+#include "fingerprint.h"
 #include "identity.h"
 #include "piv.h"
 #include "settings.h"
@@ -130,7 +132,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     snprintf(line, sizeof(line),
-             "OK STATUS firmware=rp2040 presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s name=\"%s\"",
+             "OK STATUS firmware=rp2040 presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s name=\"%s\"",
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
@@ -141,6 +143,7 @@ static void handle_command(void) {
              // Whether the button was down when the device booted. Reported so
              // the reset gesture can be verified without watching the LED.
              button_held_at_boot() ? "yes" : "no",
+             fingerprint_status_text(),
              identity_common_name());
     send_line(line);
 
@@ -219,6 +222,31 @@ static void handle_command(void) {
     piv_set_pairing_mode(false);
     send_line("OK PAIRING_MODE_OFF");
 
+  } else if (strncmp(command, "ENROLL", 6) == 0) {
+    // Enrols a finger into a slot, defaulting to the next free one. Costs a
+    // press first: adding a fingerprint is adding a way to use the key, so it
+    // deserves the same physical proof as any other reconfiguration.
+    if (!fingerprint_present()) {
+      send_line("ERR ENROLL no_module");
+      return;
+    }
+    unsigned slot = fingerprint_template_count();
+    if (command[6] == ' ') slot = (unsigned)atoi(command + 7);
+    if (!demand_button_press()) return;
+
+    send_line("PROMPT FINGER place and lift, then place again");
+    if (fingerprint_enroll((uint16_t)slot, 30000)) {
+      snprintf(line, sizeof(line), "OK ENROLL slot=%u total=%u", slot,
+               fingerprint_template_count());
+      send_line(line);
+    } else {
+      send_line("ERR ENROLL");
+    }
+
+  } else if (strcmp(command, "FINGERPRINT_ERASE") == 0) {
+    if (!demand_button_press()) return;
+    send_line(fingerprint_erase_all() ? "OK FINGERPRINT_ERASE" : "ERR FINGERPRINT_ERASE");
+
   } else if (strcmp(command, "GENERATE_IDENTITY") == 0) {
     // Replaces the identity with a freshly generated one whose private key has
     // never left this chip. Destroys the old one, so anything paired to it
@@ -249,6 +277,9 @@ static void handle_command(void) {
     if (!demand_button_press()) return;
     bool ok = storage_erase();
     ok = settings_reset() && ok;
+    // Templates too. A device handed on with the previous owner's finger still
+    // enrolled would authorise them on the new owner's account.
+    fingerprint_erase_all();
     piv_set_pairing_mode(false);
     config_authorized_until = 0;
     send_line(ok ? "OK FACTORY_RESET rebooting" : "ERR FACTORY_RESET");
