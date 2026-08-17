@@ -1,42 +1,69 @@
-# smart-card
+# openhanko-firmware
 
-A standalone USB device that unlocks macOS the way Touch ID does — login,
-`sudo`, TCC prompts — without a Touch ID sensor. The device enumerates as a PIV
-smart card over USB CCID, and macOS authenticates against a private key the
-device will only use when you physically press its button.
-
-**Status: working on hardware, on two MCUs.** macOS enumerates it as a CCID
-reader, attaches its PIV token driver, reads the certificate, pairs it to the
-account, and authenticates `sudo` against it.
+Firmware for [OpenHanko](https://openhanko.io): a small USB device that unlocks
+a Mac the way Touch ID does — login, `sudo`, authorisation prompts — on a Mac
+that hasn't got one. It enumerates as a PIV smart card over USB CCID, and macOS
+authenticates against a private key the device generated itself and will only
+use when someone physically touches it.
 
 ```
 $ system_profiler SPSmartCardsDataType
     Readers:
-      #01: smart-card-poc smart-card-poc (ATR:{length = 4, bytes = 0x3b800101})
+      #01: OpenHanko Smart Card (ATR:{length = 4, bytes = 0x3b800101})
 ```
 
-| | ESP32-S3 | RP2040 |
-| --- | --- | --- |
-| signing | ECDSA P-256, **162 ms** | ECDSA P-256, **469 ms** |
-| press to authenticated | ~0.7 s | ~0.6 s |
-| radio | BLE 5 | none |
-| presence button | GPIO0 / BOOT | GP10 |
-| indicator | WS2812 GPIO48 | WS2812 GP16 |
+## Hardware
 
-## Variants
+**Target: RP2350**, with an HLK-ZW111 capacitive fingerprint module as the
+presence check. `rp2040/` builds for both parts — the RP2350 is pin-compatible
+in the ways that matter here and the port is small.
 
-| | authorization | state |
+| | role | state |
 | --- | --- | --- |
-| **simple** | a button press | works on hardware, ESP32-S3 and RP2040 |
-| **standard** | a fingerprint match | not started — see [upstream](https://github.com/ZimengXiong/tinyTouch) |
-| **wireless** | either, over BLE | transport works; host side outstanding |
+| **RP2350** | what ships | target; secure boot, OTP, real TRNG |
+| **RP2040** | development | everything below is measured on this |
+| **ESP32-S3** | where it started | `simple/`, kept and working, not the target |
+
+RP2350 is the shipping part for reasons that are about keys rather than speed.
+It can verify a signed image at boot, permanently disable SWD through OTP, and
+generate keys from a hardware TRNG. The RP2040 can do none of those: its debug
+port is always open, so anyone who opens the case reads the key out and the
+fingerprint sensor is simply stepped around. **A key generated on an RP2040 is
+for development.** That distinction is what makes the sensor worth fitting at
+all.
+
+| | RP2040 | ESP32-S3 |
+| --- | --- | --- |
+| signing | ECDSA P-256, **469 ms** | ECDSA P-256, **162 ms** |
+| touch to authenticated | ~0.6 s | ~0.7 s |
+| presence | GP10 button, ZW111 on UART1 | GPIO0 / BOOT |
+| indicator | the sensor's own LED ring | WS2812 GPIO48 |
+
+The ESP32-S3 build is kept because it works and because the applet is shared,
+not because anything is planned for it. Why it was chosen originally, and why
+no other ESP32 can do this, is in [the history](#why-it-started-on-an-esp32-s3)
+below — the analysis is still correct and still useful if you ever want to put
+this on that family.
+
+## Status
+
+Working on hardware, end to end. macOS enumerates it, attaches a PIV token
+driver, reads the certificate, pairs it to the account, and authenticates
+`sudo` and the login window against it. The device generates its own key at
+first boot, names itself after that key, and can erase itself back to factory
+state without a host.
+
+The fingerprint driver in `rp2040/fingerprint.c` is written against the EF-01
+protocol but **not yet tested against a module** — the sensors are on order. A
+board with no sensor attached reports `fp=absent` and keeps the button as the
+trigger, so one firmware serves both.
 
 This is derived from [ZimengXiong/tinyTouch](https://github.com/ZimengXiong/tinyTouch)
-(`firmware/tiny_touch_smartcard`), kept in `reference/` for comparison. The PIV
-applet and CCID transport are substantially upstream's work. What changed, and
-the bugs found while reading it, are in [UPSTREAM-REVIEW.md](UPSTREAM-REVIEW.md).
+(`firmware/tiny_touch_smartcard`). The PIV applet and CCID transport are
+substantially upstream's work. What changed, and the bugs found while reading
+it, are in [UPSTREAM-REVIEW.md](UPSTREAM-REVIEW.md).
 
-## Why ESP32-S3 specifically
+## Why it started on an ESP32-S3
 
 Not for compute — for the **USB-OTG peripheral**. A PIV card is three custom USB
 interfaces at once: CCID (class 0x0b), HID keyboard, and CDC.
@@ -55,14 +82,10 @@ interfaces at once: CCID (class 0x0b), HID keyboard, and CDC.
   silicon, not a programmable device controller. You cannot add a CCID interface
   to it. This is a silicon limit, not a board-wiring one.
 - **S2** would work wired, but has no Bluetooth — a dead end for the BLE variant.
-- **S3** is the only mainstream part with USB-OTG *and* BLE 5. Modules cost about
-  the same as a C3 (~$2–3).
+- **S3** is the only mainstream part with USB-OTG *and* BLE 5.
 
-**BLE caveat:** macOS has no BLE smart-card transport, so wireless PIV needs a
-host-side CryptoTokenKit token driver bridging BLE to a virtual token. That
-driver now exists and works over USB (the [openhanko-macos](../openhanko-macos) repository), which makes wireless a
-transport swap rather than a research problem — but it will be in-session only,
-since pre-login there is no user session for CoreBluetooth to live in.
+That last column stopped mattering when wireless was dropped, and with it the
+reason to be on this family at all.
 
 ## Wireless was built, measured, and dropped
 
@@ -260,7 +283,7 @@ proving a unit before boxing it and handing one to somebody else — the second
 needs the key destroyed rather than merely unpaired, or the device still
 authenticates as its previous owner wherever they paired it.
 
-## Hardware
+### ESP32-S3 wiring
 
 - Any ESP32-S3 board with the native USB pins (GPIO19/20) on a connector.
   Seeed XIAO ESP32-S3 and ESP32-S3-DevKitC-1 both work.
@@ -297,11 +320,13 @@ boot-time clear is for.
 Using GPIO0 means holding the button during reset enters firmware download mode.
 That is convenient now and worth moving off later.
 
-## The RP2040 port
+## RP2040 and RP2350
 
-`rp2040/` is the same device on a Raspberry Pi RP2040 — cheaper, smaller,
-and with no radio, which costs nothing given wireless PIV is impossible anyway.
-It enumerates, macOS reads the certificate and offers to pair.
+`rp2040/` is the shipping line. The same applet on a Raspberry Pi part —
+cheaper, smaller, and with no radio, which costs nothing now that wireless is
+gone. It builds for the RP2350 as well, which is what units are assembled from:
+the difference that matters is not speed but that an RP2350 can lock its debug
+port and generate keys from a real TRNG.
 
 ```sh
 export PICO_SDK_PATH=~/.pico-sdk/sdk/2.2.0
@@ -313,8 +338,9 @@ cp -X smart_card_rp2040.uf2 /Volumes/RPI-RP2/
 
 | function | pin |
 | --- | --- |
+| fingerprint module | **GP4** TX, **GP5** RX (UART1, 57600) — HLK-ZW111 |
 | presence button | **GP10** to GND (internal pull-up, no resistor) |
-| indicator LED | **GP16**, WS2812 addressable RGB, driven by PIO |
+| indicator LED | **GP16**, WS2812 — redundant once a sensor is fitted, since the module has its own ring |
 
 **Double-tap RESET** within 800 ms to enter the bootloader — `pico_bootsel_via_double_reset`
 from the SDK, so reflashing needs neither the BOOTSEL hold nor an unlocked
@@ -656,27 +682,39 @@ anything. In short, and bluntly:
 ## Layout
 
 ```
-simple/       ESP-IDF project — button-gated PIV smart card
-  main/board_config.h  button pin, LED pin, brightness, dummy PIN
-  main/main.c          presence task: press -> authorize -> type PIN
-  main/button.c        debounced GPIO with claim/release arbitration
-  main/status_led.c    WS2812: off at boot, breathes while awaiting a press
-  main/secrets.h       compile-time PIV identity (gitignored, auto-seeded)
-  main/piv.c           PIV applet: certificates, VERIFY, GENERAL AUTHENTICATE
-  main/usb_ccid.c      CCID class driver over TinyUSB
-  main/usb_hid.c       HID keyboard, used only for the dummy PIN
-  main/config_console.c  provisioning console on CDC
-./provision.py     key generation, provisioning, macOS pairing
-reference/             upstream tinyTouch clone, for comparison
+rp2040/                the shipping line — builds for RP2040 and RP2350
+  board_config.h       pins, AID default, timings
+  main.c               cooperative loop: presence, indicator, mode switching
+  piv.c                PIV applet: certificates, VERIFY, GENERAL AUTHENTICATE,
+                       ECDH on slot 9D
+  identity.c           generates the device's own keypair and certificate
+  fingerprint.c        HLK-ZW111 over UART (EF-01) — untested against hardware
+  settings.c           which AID to answer, in its own flash sector
+  storage.c            the PIV identity, in flash, outside the image
+  usb_ccid.c           CCID class driver over TinyUSB
+  usb_hid.c            HID keyboard, for typing the PIN in driverless mode
+  config_console.c     provisioning and diagnostics on CDC
+  trace.c              ring buffer of CCID and APDU activity — the single most
+                       useful debugging tool in this project
+
+simple/                ESP32-S3, where this started; works, not the target
+provision.py           key generation, provisioning, macOS pairing
 UPSTREAM-REVIEW.md     what was found reading upstream, and what changed
 ```
 
+The macOS driver and the site live in their own repositories:
+[openhanko-macos](https://github.com/openhanko/openhanko-macos) and
+openhanko-web.
+
 ## Next steps
 
-1. Flash it and run the pairing flow end to end. Nothing here has touched real
-   hardware yet.
-2. If `sc_auth pair` misbehaves, `provision.py monitor` plus
-   `system_profiler SPSmartCardsDataType` is the place to start.
-3. For `standard`, port `reference/.../fingerprint.c` behind the same
-   `button.h` interface — `button_claim` / `button_wait_press` is the seam it
-   should slot into.
+1. **Wire a ZW111 and test `fingerprint.c`.** It is written from the protocol,
+   not against a module. The search range and the LED parameters are the two
+   things most likely to need adjusting.
+2. **Port to RP2350** and regenerate every identity there. Keys made on an
+   RP2040 come from ring-oscillator jitter and are development-only; the
+   RP2350's TRNG is what makes them worth trusting.
+3. **Burn OTP and lock debug**, last, on a unit you can afford to brick. This is
+   the step that turns the fingerprint from a convenience into a security
+   property — without it, anyone who opens the case reads the key out and never
+   touches the sensor.
