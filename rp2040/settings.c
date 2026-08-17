@@ -94,6 +94,14 @@ bool settings_set_aid_mode(aid_mode_t mode) {
   return true;
 }
 
+bool settings_reset(void) {
+  uint32_t interrupts = save_and_disable_interrupts();
+  flash_range_erase(SETTINGS_FLASH_OFFSET, SETTINGS_REGION_SIZE);
+  restore_interrupts(interrupts);
+  cached_mode = (aid_mode_t)PIV_DEFAULT_AID_MODE;
+  return true;
+}
+
 const char *settings_aid_mode_name(aid_mode_t mode) {
   return mode == AID_MODE_PINPAD ? "pinpad" : "standard";
 }

@@ -38,3 +38,9 @@ aid_mode_t settings_aid_mode(void);
 bool settings_set_aid_mode(aid_mode_t mode);
 
 const char *settings_aid_mode_name(aid_mode_t mode);
+
+// Erases the settings sector, returning every setting to its compiled default.
+// Part of a factory reset: a device being passed to someone else should behave
+// exactly like one out of the box, which means the standard AID regardless of
+// what the previous owner had installed.
+bool settings_reset(void);
