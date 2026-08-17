@@ -13,7 +13,6 @@ endif()
 idf_component_register(
   SRCS
     "main.c"
-    "ble_transport.c"
     "button.c"
     "config_console.c"
     "piv.c"
@@ -23,5 +22,5 @@ idf_component_register(
     "usb_descriptors.c"
     "usb_hid.c"
   INCLUDE_DIRS "."
-  REQUIRES bootloader_support bt driver esp_timer esp_tinyusb mbedtls nvs_flash
+  REQUIRES bootloader_support driver esp_timer esp_tinyusb mbedtls nvs_flash
 )

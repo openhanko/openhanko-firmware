@@ -1,4 +1,3 @@
-#include "ble_transport.h"
 #include "board_config.h"
 #include "bootloader_random.h"
 #include "button.h"
@@ -66,22 +65,14 @@ void app_main(void) {
   // hardware RNG is seeded once at boot and thereafter is just a PRNG, which is
   // what mbedTLS gets handed for RSA blinding in piv_rng().
   //
-  // Bluetooth gives the hardware RNG a genuine entropy source, so with the radio
-  // enabled there is nothing to do. Without it, esp_random() is only seeded once
-  // at boot, and the SAR ADC source has to be turned on by hand — but the two
-  // contend for the same ADC, hence the either/or.
   //
   // It matters more than it looks. PKCS#1 v1.5 padding is deterministic, so weak
   // randomness mostly costs side-channel resistance there; with ECDSA a
   // predictable nonce leaks the private key outright. Signing is RFC 6979
   // deterministic for that reason, which takes the RNG out of the path either
   // way. See UPSTREAM-REVIEW.md finding 6.
-#if CONFIG_BT_ENABLED
-  ESP_LOGI(TAG, "Bluetooth is enabled; the radio feeds the hardware RNG");
-#else
   bootloader_random_enable();
   ESP_LOGI(TAG, "hardware RNG entropy source enabled");
-#endif
 
   button_init();
   status_led_init(led_mode);
@@ -89,11 +80,6 @@ void app_main(void) {
   usb_ccid_start(piv_handle_apdu);
   config_console_start();
 
-#if CONFIG_BT_ENABLED
-  // The same applet, reachable over the air. Wired and wireless share
-  // piv_handle_apdu() so they cannot drift apart.
-  ble_transport_start(piv_handle_apdu);
-#endif
 
   xTaskCreate(presence_task, "presence", 4096, NULL, 4, NULL);
 

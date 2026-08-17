@@ -36,16 +36,3 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 # of failure. See UPSTREAM-REVIEW.md finding 6.
 CONFIG_MBEDTLS_ECDSA_DETERMINISTIC=y
 
-# BLE, for the wireless transport. NimBLE rather than Bluedroid: it is roughly
-# half the flash for a peripheral-only role, and this device is only ever a
-# peripheral.
-CONFIG_BT_ENABLED=y
-CONFIG_BT_NIMBLE_ENABLED=y
-CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
-CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
-CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
-CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
-# One connection is all a single host needs, and each costs RAM.
-CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
-# Large enough that a chunked certificate response fits one notification.
-CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=512
