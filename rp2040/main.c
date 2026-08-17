@@ -29,7 +29,31 @@ static uint32_t now_ms(void) {
 // How long a press stays good for answering a pinpad request.
 #define PRESS_ANSWERS_PINPAD_MS 10000
 
+// How long the indicator acknowledges a press.
+//
+// Long enough to register as deliberate rather than as a glitch, short enough
+// not to be mistaken for the breathing invitation. In standard mode this is the
+// only feedback the device can give: it is never told that macOS wants
+// anything, so it can confirm what it did but never invite.
+#define CONFIRM_MS 700
+
+static uint32_t confirm_until_ms;
+
+static status_led_mode_t led_mode(void) {
+  // The invitation outranks the acknowledgement: if macOS is waiting on a
+  // pinpad entry, saying "press" matters more than "I heard the last one".
+  if (usb_ccid_pin_pending()) return STATUS_LED_BREATHE;
+  if (confirm_until_ms != 0 && (int32_t)(now_ms() - confirm_until_ms) < 0) {
+    return STATUS_LED_CONFIRM;
+  }
+  // Holds through the signature that follows a press, so the light covers the
+  // whole operation rather than going dark in the middle of it.
+  if (piv_recent_signature()) return STATUS_LED_CONFIRM;
+  return STATUS_LED_OFF;
+}
+
 static void handle_press(void) {
+  confirm_until_ms = now_ms() + CONFIRM_MS;
   printf("main: button pressed, authorizing PIV and typing the dummy PIN\n");
   config_console_send_line("EVENT PRESS");
   piv_note_user_presence();
@@ -123,7 +147,7 @@ int main(void) {
     upgrade_if_driver_present();
     revert_if_unclaimed();
 
-    status_led_update(usb_ccid_pin_pending());
+    status_led_update(led_mode());
 
     if (usb_ccid_pin_pending()) {
       // The host is waiting on a pinpad PIN entry. Either the user presses now,
@@ -135,6 +159,7 @@ int main(void) {
       if (button_pressed() || recent) {
         printf("main: answering pinpad PIN entry%s\n", recent ? " (recent press)" : "");
         config_console_send_line("EVENT PINPAD_OK");
+        confirm_until_ms = now_ms() + CONFIRM_MS;
         last_press_ms = 0;
         piv_note_pin_verified();
         piv_note_user_presence();

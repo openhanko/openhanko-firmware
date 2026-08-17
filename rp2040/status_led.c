@@ -57,24 +57,39 @@ void status_led_init(void) {
   put_pixel(0, 0, 0);
 }
 
-void status_led_update(bool waiting) {
+void status_led_update(status_led_mode_t mode) {
+  static status_led_mode_t shown = STATUS_LED_OFF;
   static bool lit;
   static uint32_t last_refresh;
 
-  if (!waiting) {
+  if (mode == STATUS_LED_OFF) {
     if (lit) {
       put_pixel(0, 0, 0);
       lit = false;
+    }
+    shown = mode;
+    return;
+  }
+
+  uint32_t now = to_ms_since_boot(get_absolute_time());
+
+  if (mode == STATUS_LED_CONFIRM) {
+    // Solid, and written once rather than every pass: an acknowledgement that
+    // flickers is worse than none, and the WS2812 holds its value anyway.
+    if (shown != STATUS_LED_CONFIRM || !lit) {
+      show_level(STATUS_LED_BRIGHTNESS);
+      lit = true;
+      shown = mode;
     }
     return;
   }
 
   // ~50 Hz is plenty for a breath and keeps the PIO FIFO out of the main loop's
   // way the rest of the time.
-  uint32_t now = to_ms_since_boot(get_absolute_time());
-  if (lit && (now - last_refresh) < 20) return;
+  if (lit && shown == STATUS_LED_BREATHE && (now - last_refresh) < 20) return;
   last_refresh = now;
   lit = true;
+  shown = mode;
 
   // Triangle wave, squared for a roughly perceptual ramp. No floating point and
   // no trigonometry: at this size the difference from a sine is not visible.
@@ -89,6 +104,6 @@ void status_led_update(bool waiting) {
 #else
 
 void status_led_init(void) {}
-void status_led_update(bool waiting) { (void)waiting; }
+void status_led_update(status_led_mode_t mode) { (void)mode; }
 
 #endif
