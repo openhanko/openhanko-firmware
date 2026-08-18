@@ -322,8 +322,8 @@ static void handle_command(void) {
     if (!require_config_authorization()) return;
     send_line("OK BOOTLOADER");
     sleep_ms(100);
-    // The RP2040 boot ROM handles this in hardware, so unlike the ESP32's
-    // force-download-boot register it lands in the bootloader every time.
+    // The boot ROM handles this in hardware, so it lands in the bootloader
+    // every time rather than depending on timing.
     reset_usb_boot(0, 0);
 
   } else {

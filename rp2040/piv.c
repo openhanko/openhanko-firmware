@@ -756,8 +756,8 @@ void piv_init(void) {
   cert_9d_der_len = 0;
 
   if (!cert_9a_pem) {
-    LOG("PIV identity is unconfigured; create main/secrets.h or run "
-                  "tools/provision.py provision");
+    LOG("PIV identity is unconfigured; create secrets.h or run "
+                  "./provision.py provision");
     return;
   }
 

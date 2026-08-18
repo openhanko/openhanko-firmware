@@ -3,8 +3,7 @@
 // Presence button.
 //
 // Set BUTTON_USE_BOOTSEL to 1 to use the BOOTSEL button instead of a wired one,
-// which makes the board work with no extra hardware — the RP2040 equivalent of
-// borrowing GPIO0 on the ESP32-S3.
+// which makes the board work with no extra hardware.
 //
 // It is not free: reading BOOTSEL means overriding the flash chip-select and
 // disabling interrupts for tens of microseconds, because the pin is on the QSPI

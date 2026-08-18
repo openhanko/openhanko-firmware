@@ -2,7 +2,7 @@
 //
 // Copy this file to secrets.h and fill in real PEMs, or just run:
 //
-//     ./tools/provision.py gen-secrets --output firmware/rp2040/secrets.h
+//     ./provision.py gen-secrets --output rp2040/secrets.h
 //
 // which generates the keys and writes a correctly formatted secrets.h for you.
 //
@@ -10,8 +10,8 @@
 // over the console instead. If it is present but still contains the
 // REPLACE_WITH placeholders below, it is ignored with a warning.
 //
-// A console-provisioned identity in NVS overrides whatever is compiled here.
-// Run FACTORY_RESET to fall back to these keys.
+// An identity in flash — generated on first boot, or pushed over the console —
+// overrides whatever is compiled here. Run FACTORY_RESET to clear it.
 //
 // Note what this costs: the private keys end up in build/ and in the flashed
 // .bin, so every device flashed from that image shares one identity, and

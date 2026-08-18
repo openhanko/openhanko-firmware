@@ -10,9 +10,9 @@ void piv_reload_keys(void);
 // True once a usable certificate is loaded, from either source.
 bool piv_has_identity(void);
 
-// Where the loaded identity came from: "nvs", "compiled", or "none".
-// A console-provisioned identity takes precedence over one baked into the
-// firmware by main/secrets.h.
+// Where the loaded identity came from: "flash", "compiled", or "none".
+// A generated or console-provisioned identity in flash takes precedence over one
+// baked into the firmware by secrets.h.
 const char *piv_key_source_name(void);
 
 // "rsa2048", "p256", or "none".

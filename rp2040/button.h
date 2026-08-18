@@ -5,10 +5,9 @@
 
 // Debounced presence button.
 //
-// Unlike the ESP32 build there is no RTOS here, so there is no claim/release
-// arbitration to do: everything runs on one cooperative loop. Whoever calls
-// button_pressed() first consumes the press, which is exactly the behaviour the
-// mutex was emulating over there.
+// There is no RTOS here, so there is no claim/release arbitration to do:
+// everything runs on one cooperative loop. Whoever calls button_pressed() first
+// consumes the press.
 //
 // Must be called regularly for debouncing to work; the config console pumps it
 // from inside its own wait loop.

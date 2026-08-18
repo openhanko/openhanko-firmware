@@ -11,8 +11,8 @@
 
 // Occupies the last three erase sectors, which is what the record needs once
 // rounded up. Kept at the top of flash and outside the image, so a firmware
-// update does not disturb a provisioned identity — the same property NVS gives
-// on the ESP32 build. PICO_FLASH_SIZE_BYTES comes from the board header, so
+// update does not disturb a provisioned identity. PICO_FLASH_SIZE_BYTES comes
+// from the board header, so
 // this follows the part rather than assuming 2 MB.
 #define STORAGE_REGION_SIZE (3 * FLASH_SECTOR_SIZE)
 #define STORAGE_FLASH_OFFSET (PICO_FLASH_SIZE_BYTES - STORAGE_REGION_SIZE)

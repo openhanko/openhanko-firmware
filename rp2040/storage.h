@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-// Persistent PIV identity, replacing the ESP32 build's NVS namespace.
+// Persistent PIV identity.
 //
 // One dedicated flash sector holds the four PEM strings. There is no wear
 // levelling and no journal: this is written once during provisioning and read

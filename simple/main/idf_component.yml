@@ -1,6 +1,0 @@
-dependencies:
-  idf:
-    version: '>=5.3,<5.4'
-  espressif/esp_tinyusb: '2.2.1'
-  espressif/tinyusb: '0.19.0~3'
-  espressif/led_strip: '^2.5.5'
