@@ -2,7 +2,7 @@
 """Host-side setup for the button-gated PIV smart card.
 
 Deliberately dependency-free: it talks to the device's CDC console with plain
-POSIX file I/O so there is nothing to install before the proof of concept runs.
+POSIX file I/O so there is nothing to install first.
 
     ./provision.py ports
     ./provision.py status
@@ -140,7 +140,7 @@ class Console:
         if not lines:
             raise Failure(
                 f"{self.port} did not answer '{command}'. Is the firmware running, "
-                "and is this the device's CDC port rather than its serial-JTAG port?"
+                "and is this the device's CDC port? Try ./provision.py ports."
             )
         if lines[-1].startswith("ERR"):
             raise Failure(f"device rejected '{command}': {lines[-1]}")
@@ -162,8 +162,8 @@ def pick_port(explicit: str | None) -> str:
     ports = list_ports()
     if not ports:
         raise Failure(
-            "no /dev/cu.usbmodem* device found. Plug the board into the USB port "
-            "wired to the S3's native USB pins, not the UART-bridge port."
+            "no /dev/cu.usbmodem* device found. Is the board plugged in and "
+            "running the firmware rather than sitting in the bootloader?"
         )
     if len(ports) > 1:
         say(f"several ports found, using {ports[0]}")

@@ -106,12 +106,17 @@ static const uint8_t configuration_descriptor[] = {
                      EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 };
 
-static char serial_string[24] = "SC-PROTOTYPE";
+// "openhanko.io:" + 12 hex digits + NUL = 26 bytes. Sized with room to spare;
+// tud_descriptor_string_cb caps the descriptor at 31 code units regardless.
+static char serial_string[32] = "openhanko.io";
 
 void smart_card_init_serial(void) {
   pico_unique_board_id_t id;
   pico_get_unique_board_id(&id);
-  snprintf(serial_string, sizeof(serial_string), "SC-%02X%02X%02X%02X%02X%02X",
+  // Bytes 0-1 are the flash vendor's, identical across boards from one supplier,
+  // so the low six carry what actually distinguishes one device from another.
+  snprintf(serial_string, sizeof(serial_string),
+           "openhanko.io:%02X%02X%02X%02X%02X%02X",
            id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7]);
 }
 

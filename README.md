@@ -58,7 +58,7 @@ the sensor entirely.
 | --- | --- |
 | VID | `0x16D0` — MCS Electronics |
 | PID | `0x1551` |
-| serial | `SC-` + the board's unique id, at runtime |
+| serial | `openhanko.io:<12 hex>`, from the board's unique id at runtime |
 | strings | manufacturer `OpenHanko`, product `Smart Card` |
 
 The VID/PID is a sublicensed allocation, which is enough for the OS to tell the
