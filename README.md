@@ -427,9 +427,18 @@ With Apple's built-in `pivtoken`: **not a single `PC_to_RDR_Secure`**, even with
 
 With the driver in [openhanko-macos](https://github.com/openhanko/openhanko-macos)
 it works — no dialog, nothing typed, authenticated by the button alone, 483 ms
-end to end. `sudo` is the exception: `pam_smartcard` collects a PIN before
-CryptoTokenKit is consulted and hands it over pre-filled, so the prompt still
-appears and the device still types `000000` there.
+end to end.
+
+`sudo` is seamless, including the prompt: that repository's `tools/pam` module
+runs ahead of `pam_smartcard.so` and goes through CryptoTokenKit, so the token
+driver performs the authentication and the press is the whole interaction. A
+`sudo` traced on this device shows `CCID 69 Secure`, the press, and the
+signature, with **no `VERIFY` at all** — nothing was typed.
+
+What is *not* solved is applications that put up their own PIN field. Chrome's
+password manager unlocks correctly but still shows a modal and takes the typed
+`000000`; pinpad governs the CryptoTokenKit-to-card leg, and an application that
+collects a PIN itself never reaches it.
 
 ### Testing caveat
 
