@@ -300,12 +300,12 @@ static bool tlv_find_one(const uint8_t *buf, size_t buf_len, uint8_t tag,
   return false;
 }
 
-// The RP2040 has no hardware TRNG. pico_rand mixes the ring oscillator's
-// random bit, the board id and timer jitter, which is weaker than the ESP32's
-// entropy source. That is tolerable here only because PKCS#1 v1.5 padding is
-// deterministic, so this feeds blinding rather than a nonce. Moving these slots
-// to ECDSA would make RNG quality critical — use RFC 6979 deterministic
-// signing if that ever happens. See UPSTREAM-REVIEW.md finding 6.
+// The RP2040 has no hardware TRNG. pico_rand mixes the ring oscillator's random
+// bit, the board id and timer jitter, which is weaker than a real entropy
+// source. Tolerable only because it is not in the nonce path: signing is RFC
+// 6979 deterministic (MBEDTLS_ECDSA_DETERMINISTIC), which derives the nonce from
+// the key and message instead. A predictable nonce would recover the private key
+// from one signature, so do not turn that off.
 static int piv_rng(void *ctx, unsigned char *out, size_t len) {
   (void)ctx;
   while (len >= sizeof(uint64_t)) {
@@ -644,8 +644,8 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
   }
 
   // Slot 9a is what macOS authenticates logins and sudo with, so each use of it
-  // costs one button press. See UPSTREAM-REVIEW.md for why slot 9d is not
-  // gated the same way.
+  // costs one button press. Slot 9d is deliberately not gated the same way —
+  // see the key agreement branch above.
   if (apdu[3] == 0x9a) {
     bool presence_valid = window_open(user_presence_until, USER_PRESENCE_WINDOW_MS);
     bool pairing_valid = window_open(pairing_mode_until, PAIRING_MODE_WINDOW_MS);

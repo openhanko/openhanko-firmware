@@ -504,8 +504,9 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
   }
 
   // Slot 9a is what macOS authenticates logins and sudo with, so each use of it
-  // costs one button press. See UPSTREAM-REVIEW.md for why slot 9d is not
-  // gated the same way.
+  // costs one button press. Slot 9d is not gated at all in this tree: macOS uses
+  // it for key management, and gating it was never tested here. Anything that
+  // reaches the device can use that key without touching it.
   if (apdu[3] == 0x9a) {
     bool presence_valid = window_open(user_presence_until, USER_PRESENCE_WINDOW_TICKS);
     bool pairing_valid = window_open(pairing_mode_until, PAIRING_MODE_WINDOW_TICKS);

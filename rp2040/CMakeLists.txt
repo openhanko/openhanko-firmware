@@ -13,8 +13,9 @@ pico_sdk_init()
 
 # secrets.h is optional user content, but the include in piv.c is unconditional
 # so the compiler records it as a dependency. Seed it from the example when
-# missing; the firmware detects placeholder content and ignores it. See
-# UPSTREAM-REVIEW.md finding 7 for why __has_include is the wrong tool here.
+# missing; the firmware detects placeholder content and ignores it. __has_include
+# is the wrong tool here: it records no dependency, so creating secrets.h after a
+# build that lacked it leaves a stale object file and flashes a keyless firmware.
 if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/secrets.h")
   configure_file("${CMAKE_CURRENT_LIST_DIR}/secrets.example.h"
                  "${CMAKE_CURRENT_LIST_DIR}/secrets.h" COPYONLY)

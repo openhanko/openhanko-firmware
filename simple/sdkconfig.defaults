@@ -33,6 +33,6 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 # RFC 6979 deterministic ECDSA. Less critical here than on the RP2040 — this
 # chip has a real entropy source once bootloader_random_enable() runs — but
 # taking the RNG out of the signing path costs nothing and removes a whole class
-# of failure. See UPSTREAM-REVIEW.md finding 6.
+# of failure.
 CONFIG_MBEDTLS_ECDSA_DETERMINISTIC=y
 

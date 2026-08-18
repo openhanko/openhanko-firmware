@@ -69,7 +69,7 @@ void app_main(void) {
   // randomness mostly costs side-channel resistance there; with ECDSA a
   // predictable nonce leaks the private key outright. Signing is RFC 6979
   // deterministic for that reason, which takes the RNG out of the path either
-  // way. See UPSTREAM-REVIEW.md finding 6.
+  // way.
   bootloader_random_enable();
   ESP_LOGI(TAG, "hardware RNG entropy source enabled");
 

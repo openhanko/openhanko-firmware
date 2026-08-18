@@ -60,32 +60,7 @@ trigger, so one firmware serves both.
 
 This is derived from [ZimengXiong/tinyTouch](https://github.com/ZimengXiong/tinyTouch)
 (`firmware/tiny_touch_smartcard`). The PIV applet and CCID transport are
-substantially upstream's work. What changed, and the bugs found while reading
-it, are in [UPSTREAM-REVIEW.md](UPSTREAM-REVIEW.md).
-
-## Why it started on an ESP32-S3
-
-Not for compute — for the **USB-OTG peripheral**. A PIV card is three custom USB
-interfaces at once: CCID (class 0x0b), HID keyboard, and CDC.
-
-| chip | USB-OTG | USB-Serial/JTAG only | BLE |
-| --- | :---: | :---: | :---: |
-| ESP32 (classic) | — | — | yes |
-| ESP32-C3 / C6 / H2 | — | yes | yes |
-| ESP32-S2 | yes | — | — |
-| **ESP32-S3** | **yes** | yes | **yes** |
-| ESP32-P4 | yes | yes | — |
-
-- **Classic ESP32** has no USB peripheral at all. It reaches a host only through
-  an external bridge chip, which is a fixed serial port. It cannot be a smart card.
-- **C3 / C6 / H2** have *USB Serial/JTAG*: a hard-wired CDC-ACM + JTAG function in
-  silicon, not a programmable device controller. You cannot add a CCID interface
-  to it. This is a silicon limit, not a board-wiring one.
-- **S2** would work wired, but has no Bluetooth — a dead end for the BLE variant.
-- **S3** is the only mainstream part with USB-OTG *and* BLE 5.
-
-That last column stopped mattering when wireless was dropped, and with it the
-reason to be on this family at all.
+substantially upstream's work.
 
 ## Wireless was built, measured, and dropped
 
@@ -412,8 +387,7 @@ provisioned, checking it against the `P1` the host asks for.
 **ECDSA here is RFC 6979 deterministic** (`MBEDTLS_ECDSA_DETERMINISTIC`), and
 that is not optional: the RP2040 has no hardware TRNG, and a predictable ECDSA
 nonce recovers the private key from a single signature. Deriving the nonce from
-the key and message takes the RNG out of the signing path entirely. See
-UPSTREAM-REVIEW.md finding 6.
+the key and message takes the RNG out of the signing path entirely.
 
 ### EC keys must use named-curve encoding
 
@@ -619,16 +593,21 @@ answers.
 
 ## Security posture
 
-Read [UPSTREAM-REVIEW.md](UPSTREAM-REVIEW.md) before trusting this with
-anything. In short, and bluntly:
+Bluntly, before trusting this with anything:
 
-- **A button proves presence, not identity.** Anyone who can reach the device can
-  authenticate as you. That is the whole point of the `simple` variant and the
-  reason the `standard` variant exists.
-- **Keys are plaintext in NVS.** Without secure boot and flash encryption,
-  `esptool.py read_flash` extracts both PIV private keys.
-- **Slot 9d is not gated at all** — inherited from upstream, documented in the
-  review, one-line fix included there.
+- **A button proves presence, not identity.** While the trigger is the button,
+  anyone who can reach the device can authenticate as you. The fingerprint sensor
+  is what changes that, and it is not tested against hardware yet.
+- **The PIN is theatre.** `VERIFY` accepts any PIN and opens a window. macOS
+  insists on collecting one, so the presence check is the only real gate.
+- **Keys are plaintext in flash.** On the RP2040 they sit outside the image and
+  come straight out over SWD; on the ESP32 build `esptool.py read_flash` does the
+  same. Closing this is what the RP2350's secure boot and debug lockout are for,
+  and none of that is enabled yet.
+- **Slot 9d is not presence-gated.** Anything that can reach the device can run
+  a key agreement against it. That is deliberate — macOS unwraps the login
+  keychain there right after a press the user already made — but it means the
+  press authorises a session, not a single operation.
 - Every attack here needs physical access to the device.
 
 ## Layout
@@ -651,7 +630,6 @@ rp2040/                the shipping line — builds for RP2040 and RP2350
 
 simple/                ESP32-S3, where this started; works, not the target
 provision.py           key generation, provisioning, macOS pairing
-UPSTREAM-REVIEW.md     what was found reading upstream, and what changed
 ```
 
 The macOS driver and the site live in their own repositories:
