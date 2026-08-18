@@ -8,11 +8,11 @@
 #include "pico/unique_id.h"
 #include "tusb.h"
 
-// Espressif's VID/PID, inherited from upstream tinyTouch. Fine on a bench,
-// wrong to ship: see README.md on getting a pid.codes allocation before this
-// leaves the desk.
-#define USB_VID 0x303a
-#define USB_PID 0x4001
+// Sublicensed from MCS Electronics, who allocate individual PIDs under their
+// own VID. Not usable for USB-IF logo certification — that needs a VID of your
+// own — but this device is not certified and will not be.
+#define USB_VID 0x16d0
+#define USB_PID 0x1551
 #define USB_BCD 0x0200
 
 #define ITF_NUM_CCID 0

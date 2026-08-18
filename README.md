@@ -30,8 +30,6 @@ Not done:
   button, so one image serves both.
 - Not yet ported to RP2350. Keys generated on an RP2040 are development-only.
 - Secure boot, OTP and debug lockout are not enabled.
-- USB VID/PID is still `0x303a:0x4001`, Espressif's, inherited from upstream.
-  Must change before any unit ships.
 
 ## Hardware
 
@@ -53,6 +51,22 @@ the sensor entirely.
 | fingerprint module | **GP4** TX, **GP5** RX — UART1, 57600, HLK-ZW111 |
 | presence button | **GP10** to GND, internal pull-up |
 | indicator LED | **GP16**, WS2812 — redundant once a sensor is fitted, which has its own ring |
+
+### USB identity
+
+| | |
+| --- | --- |
+| VID | `0x16D0` — MCS Electronics |
+| PID | `0x1551` |
+| serial | `SC-` + the board's unique id, at runtime |
+| strings | manufacturer `OpenHanko`, product `Smart Card` |
+
+The VID/PID is a sublicensed allocation, which is enough for the OS to tell the
+device apart from everything else on the bus. It does not permit USB-IF logo
+certification; that needs a VID of your own.
+
+macOS builds the reader name by concatenating the manufacturer and product
+strings, so they must differ or the pairing dialog reads "OpenHanko OpenHanko".
 
 Defaults live in [`rp2040/board_config.h`](rp2040/board_config.h). For a bare
 board with nothing wired, set `BUTTON_USE_BOOTSEL 1` to borrow the BOOTSEL
@@ -416,8 +430,7 @@ openhanko-web.
 
 1. **Wire a ZW111 and test `fingerprint.c`.** The search range and the LED
    parameters are the two things most likely to need adjusting.
-2. **Allocate a real VID/PID.** `0x303a:0x4001` is Espressif's.
-3. **Port to RP2350** and regenerate every identity there.
-4. **Burn OTP and lock debug**, last, on a unit you can afford to brick. This is
+2. **Port to RP2350** and regenerate every identity there.
+3. **Burn OTP and lock debug**, last, on a unit you can afford to brick. This is
    the step that turns the fingerprint from a convenience into a security
    property.
