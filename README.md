@@ -122,6 +122,34 @@ the sensor entirely.
 | presence button | **GP10** to GND, internal pull-up |
 | indicator LED | **GP16**, WS2812 — redundant once a sensor is fitted, which has its own ring |
 
+### Which stepping am I holding?
+
+`STATUS` reports it as `chip=`, e.g. `chip=rp2350-a4` or `chip=rp2040-b2`.
+
+Read from the boot ROM version byte at `0x00000013`, not from
+`CHIP_ID.REVISION` — **A4 changed only the boot ROM and reports the same
+revision as A3**, so the revision field cannot tell them apart. `picotool` reads
+the same byte. `2` is A2, `3` is A3, `4` is A4.
+
+This is a security property, not trivia. Three findings from the RP2350 Hacking
+Challenge are fixed in silicon and in no other way:
+
+| | E16 glitch to debug + OTP | E20 unsigned boot | E24 laser fault | E9 GPIO |
+| --- | --- | --- | --- | --- |
+| **A2** | open | flag only | open | open |
+| **A3** | fixed | flag only | open | fixed |
+| **A4** | fixed | fixed | fixed | fixed |
+
+On A2, an attacker with the device and glitching equipment can recover the
+signing key whatever the firmware does. Mass production moved to A4 in July 2025;
+A4 parts are marked `RP2350A0A4`.
+
+`BOOT_FLAGS0.DISABLE_WATCHDOG_SCRATCH` is the documented mitigation for E20 —
+but it also disables the watchdog scratch register that
+`pico_bootsel_via_double_reset` depends on. Setting it on A3 or A4 buys nothing,
+since E20 is already fixed there, and costs the double-tap-RESET route back into
+the bootloader. With SWD locked, that is the only route.
+
 ### USB identity
 
 | | |
@@ -253,7 +281,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | command | effect |
 | --- | --- |
 | `PING` | → `PONG` |
-| `STATUS` | firmware, key source, algorithm, AID mode, pairing, sensor, name |
+| `STATUS` | silicon stepping, key source, algorithm, AID mode, pairing, sensor, name |
 | `TRACE` / `TRACE_CLEAR` | ring buffer of CCID and APDU activity |
 | `BENCH` | time one signature with the loaded key |
 | `GENERATE_IDENTITY` | new on-device keypair and certificate |
