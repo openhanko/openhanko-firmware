@@ -181,7 +181,10 @@ per session, then touch — not a flag flip.
 
 **May:**
 
-- The private key is generated on the device and never leaves it.
+- The private key is generated on the device and is never transmitted, copied or
+  backed up — no provisioning machine ever held it. That is a statement about
+  normal operation, not about an attacker with the device: see §4, where every
+  shipped state still has it extractable.
 - A compromised host cannot sign without a physical press.
 - Credentials cannot be erased by any host command.
 - Firmware, hardware and protocol are published.

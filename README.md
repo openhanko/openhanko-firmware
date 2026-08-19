@@ -213,7 +213,10 @@ directory caches it, so a missing SDK only surfaces on a clean checkout.
 ## Identity
 
 A device with no identity generates a P-256 keypair and self-signed certificate
-at first boot. The private key never leaves the chip.
+at first boot. The private key is never transmitted and never copied to a host —
+though it is not *unextractable*: on every state shipped so far it can be read
+out of flash by someone holding the device. See
+[THREAT-MODEL.md](THREAT-MODEL.md).
 
 Certificates are named after the tail of the public key's SHA-1, which is also
 how macOS derives `kSecAttrApplicationLabel` — the hash `sc_auth` pairs against:
@@ -306,6 +309,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `FINGERPRINT_INFO` | module serial, firmware, manufacturer, sensor name |
 | `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
 | `PAIRING_MODE` / `PAIRING_MODE_OFF` | sign without a press, for pairing flows |
+| `AID_MODE standard\|pinpad` | force the AID mode instead of letting the probe decide |
 | `BOOTLOADER` | reboot to USB mass-storage bootloader |
 | `REBOOT`, `USB_RECONNECT` | as named |
 | `CONFIG_UNLOCK` | required before destructive commands |
