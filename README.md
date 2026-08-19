@@ -122,6 +122,22 @@ the sensor entirely.
 | presence button | **GP10** to GND, internal pull-up |
 | indicator LED | **GP16**, WS2812 — redundant once a sensor is fitted, which has its own ring |
 
+The ZW111 harness is six wires, not four:
+
+| ZW111 pin | to |
+| --- | --- |
+| 1 `V_Touch` | 3V3 — **permanently powered**, this is what runs finger detection while the rest of the module sleeps |
+| 2 `TouchOut` | not currently wired; asserts on finger contact |
+| 3 `VCC` | 3V3 |
+| 4 `TX` | GP5 (module → MCU) |
+| 5 `RX` | GP4 (MCU → module) |
+| 6 `GND` | GND |
+
+`TouchOut` is the one optional wire. Correlating it with the UART match response
+costs a GPIO and raises the bar for forging a match from "drive RX" to "drive RX
+and a second line in a plausible time relationship". Everything about that link
+is cost-raising rather than authentication — see [the sensor link](#the-sensor-link-cannot-be-authenticated).
+
 ### Which stepping am I holding?
 
 `STATUS` reports it as `chip=`, e.g. `chip=rp2350-a4` or `chip=rp2040-b2`.
@@ -493,6 +509,61 @@ through `SecKeyCreateSignature`. It was removed because:
 
 The firmware ECDH, the AID mode switching and the driver architecture came out
 of that work. The code is in the history.
+
+## The sensor link cannot be authenticated
+
+Worth stating plainly, because it is the limit that no firmware here closes.
+
+The ZW111 speaks the EF-01 / ZhianTec-family protocol over plain UART at 57600.
+Confirmed opcodes, cross-checked against
+[GavinnnTann/HLK-ZW-Fingerprint-Sensor](https://github.com/GavinnnTann/HLK-ZW-Fingerprint-Sensor)
+and what this driver implements:
+
+| opcode | command | implemented here |
+| --- | --- | --- |
+| `0x01` | `PS_GetImage` | yes |
+| `0x02` | `PS_GenChar` — image to buffer | yes |
+| `0x05` | `PS_RegModel` | yes |
+| `0x06` | `PS_StoreChar` | yes |
+| `0x0d` | `PS_Empty` — erase all templates | yes |
+| `0x0f` | `PS_ReadSysPara` | no |
+| `0x12` | `PS_SetPwd` — persists to flash | no |
+| `0x13` | `PS_VfyPwd` | yes |
+| `0x14` | `PS_GetRandomCode` — module's own hardware RNG | yes |
+| `0x16` | `PS_ReadINFpage` — 512-byte info page, carries a product serial | **no** |
+| `0x1b` | fast search — ZW1xx only, ZW30xx answers `0x13` | yes |
+| `0x1d` | `PS_TemplateNum` | yes |
+| `0x3c` | `AURALEDCONFIG` — ZW1xx only | yes |
+
+There is **no encrypted or authenticated mode**. The 4-byte password is sent in
+clear on every power-up, so it is capturable on the first transaction; it is a
+speed bump, not a secret. An attacker holding the device can cut the harness and
+speak the protocol directly, and the module will tell them anything it would
+tell us.
+
+So a forged match response makes the device sign. Secure boot, SWD lockout, OTP
+protection and encryption at rest all keep working correctly — they are simply
+not in that path. **The honest claim is: resists a compromised host, resists
+offline key extraction, does not resist physical possession.**
+
+What raises cost without pretending to be authentication:
+
+- **Bind to the module.** `PS_ReadINFpage` (`0x16`) returns a product serial;
+  store a hash of it at pairing and refuse a module that changes. Defeats a swap
+  with a stock module, not an emulator that replays the expected serial. This
+  driver does not implement `0x16` yet, and it is the prerequisite for the rest.
+- **Correlate `TouchOut`.** Require the touch line to assert in a plausible
+  relationship to the UART response.
+- **Drive the full sequence.** Never trust one confirmation byte; run
+  `GetImage → GenChar → Search` and check each stage against the last.
+- **Bound the timing.** Reject responses that arrive implausibly fast. Bounds
+  have to be measured across real modules, not guessed — capture latency varies
+  with finger quality.
+
+Note what is *not* on that list: deriving a key from a fingerprint template. The
+ZW111 runs a self-learning algorithm, so templates mutate with use and no derived
+key would be stable, and the template is readable by whoever holds the module, so
+it is not secret either.
 
 ## Security posture
 
