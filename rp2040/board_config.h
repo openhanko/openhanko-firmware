@@ -17,6 +17,24 @@
 //
 // GPIO10 with the internal pull-up: wire the switch between GP10 and any GND
 // pin. No external resistor needed.
+// Whether a button press may authorise a signature.
+//
+// 0 on any unit with a sensor fitted: the fingerprint is the only thing that
+// authenticates, and such a build contains no path whatsoever from the button
+// to piv_note_user_presence().
+//
+// Compile-time rather than a runtime "use the button when no module answers",
+// because that runtime rule would mean unplugging the sensor inside the case
+// downgrades the device to press-to-authenticate — far easier than forging the
+// UART link, and it would defeat the sensor entirely for anyone holding the
+// device. Compiled out, removing the sensor yields a device that cannot
+// authenticate at all, which is the correct failure.
+//
+// 1 only for bench boards with no sensor: cmake -DBUTTON_AUTHENTICATES=1
+#ifndef BUTTON_AUTHENTICATES
+#define BUTTON_AUTHENTICATES 0
+#endif
+
 #define BUTTON_GPIO 10
 #define BUTTON_ACTIVE_LEVEL 0
 #define BUTTON_PULL_UP 1

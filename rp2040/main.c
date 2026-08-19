@@ -54,9 +54,19 @@ static status_led_mode_t led_mode(void) {
   return STATUS_LED_OFF;
 }
 
-static void handle_press(void) {
+// The single funnel for "the user proved they are here". On a production unit
+// the only caller is a fingerprint match; BUTTON_AUTHENTICATES adds the button
+// back for bench boards with no sensor.
+//
+// last_press_ms is set here rather than at each call site because the pinpad
+// branch reads it to decide whether presence was proved recently enough to
+// answer a PIN request. Setting it only on the button path — which is what this
+// did before — meant a fingerprint match authorised signing but never completed
+// the pinpad exchange, leaving macOS waiting on a card that had already agreed.
+static void note_presence(const char *source) {
+  last_press_ms = now_ms();
   confirm_until_ms = now_ms() + CONFIRM_MS;
-  printf("main: button pressed, authorizing PIV and typing the dummy PIN\n");
+  printf("main: presence from %s; authorizing PIV and typing the dummy PIN\n", source);
   config_console_send_line("EVENT PRESS");
   piv_note_user_presence();
   if (!usb_hid_type_line(PIV_DUMMY_PIN)) {
@@ -139,12 +149,20 @@ static void factory_reset_gesture(void) {
 // hundreds of times a second.
 #define FINGERPRINT_POLL_MS 200
 
+static bool enroll_owns_ring;
+
 // Mirrors the indicator state onto the module's own LED ring.
 //
 // Only on change: every call is a UART exchange, and repainting a steady light
 // sixty times a second would flood the link the sensor also answers on.
 static void mirror_light(status_led_mode_t mode) {
   static status_led_mode_t shown = (status_led_mode_t)-1;
+  if (enroll_owns_ring) {
+    // Force a repaint when enrollment gives the ring back, or the indicator
+    // would sit in whatever colour enrollment left behind.
+    shown = (status_led_mode_t)-1;
+    return;
+  }
   if (!fingerprint_present() || mode == shown) return;
   shown = mode;
 
@@ -154,6 +172,129 @@ static void mirror_light(status_led_mode_t mode) {
     case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
     default:                 fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0); break;
   }
+}
+
+// ---------------------------------------------------------------- enrollment
+//
+// The button never authenticates (see BUTTON_AUTHENTICATES), so it is free to
+// mean something else, and what it means is "I want to add a finger". The click
+// alone only marks intent: what authorises the operation is the finger resting
+// on the sensor at the moment of the click, which must already be enrolled.
+//
+// That matters because enrollment is the one operation that keeps the key and
+// adds a way to use it. Someone who has stolen the device can wipe it — that
+// destroys the key, so they gain nothing — but they must not be able to add
+// their own finger to a working device and walk away with a credential that
+// answers to them.
+
+#define ENROLL_ARM_MS     30000   // to present the new finger
+#define ENROLL_CAPTURE_MS 20000   // to complete the impressions once started
+#define ENROLL_SETTLE_MS  1200    // how long the result stays lit
+
+typedef enum {
+  ENROLL_IDLE = 0,
+  ENROLL_WAIT_LIFT,   // the gate finger is probably still down; wait for it off
+  ENROLL_WAIT_TOUCH,  // ring breathing, waiting for the finger to enrol
+  ENROLL_SETTLE,      // showing the outcome before releasing the ring
+} enroll_state_t;
+
+static enroll_state_t enroll_state;
+static uint32_t enroll_deadline;
+static void enroll_open(const char *why) {
+  enroll_state = ENROLL_WAIT_LIFT;
+  enroll_deadline = now_ms() + ENROLL_ARM_MS;
+  enroll_owns_ring = true;
+  printf("main: enrollment open (%s)\n", why);
+  config_console_send_line("EVENT ENROLL_OPEN");
+  fingerprint_light(FP_LIGHT_BREATHE, FP_LED_PURPLE, 0);
+}
+
+static void enroll_finish(bool ok) {
+  config_console_send_line(ok ? "EVENT ENROLL_OK" : "EVENT ENROLL_FAILED");
+  fingerprint_light(FP_LIGHT_STEADY, ok ? FP_LED_GREEN : FP_LED_RED, 0);
+  enroll_state = ENROLL_SETTLE;
+  enroll_deadline = now_ms() + ENROLL_SETTLE_MS;
+}
+
+// Opens enrollment if the finger on the sensor says it may.
+static void enroll_gate(void) {
+  if (enroll_state != ENROLL_IDLE || !fingerprint_present()) return;
+
+  if (fingerprint_template_count() == 0) {
+    // Nothing to match against, and nothing yet to protect: with no templates
+    // the device cannot authenticate for anybody, so there is no capability
+    // here to escalate. This is the same door the boot-time arm walks through.
+    enroll_open("no finger enrolled yet");
+    return;
+  }
+
+  uint16_t slot = 0, score = 0;
+  if (fingerprint_verify(&slot, &score)) {
+    // Deliberately not note_presence(): the user pressed the button to
+    // configure the device, and a gesture that silently authorised whatever
+    // macOS happened to be waiting for would be a surprise.
+    printf("main: enrollment gate opened by slot %u (score %u)\n", slot, score);
+    // Two flashes for yes and one long for no. Green against red is the pair
+    // red-green colourblindness collapses, and at the gate this flash is the
+    // only feedback there is, so the count carries the meaning and the colour
+    // only reinforces it.
+    fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 2);
+    enroll_open("gated by a matching finger");
+  } else {
+    printf("main: enrollment refused: no matching finger on the sensor\n");
+    config_console_send_line("EVENT ENROLL_REFUSED");
+    fingerprint_light(FP_LIGHT_FLASH, FP_LED_RED, 1);
+  }
+}
+
+static void poll_enrollment(void) {
+  if (enroll_state == ENROLL_IDLE) return;
+
+  if (enroll_state == ENROLL_SETTLE) {
+    if ((int32_t)(now_ms() - enroll_deadline) < 0) return;
+    enroll_state = ENROLL_IDLE;
+    enroll_owns_ring = false;
+    // A device with no finger enrolled is inert, so keep asking rather than
+    // going dark and leaving the user with nothing to act on.
+    if (fingerprint_present() && fingerprint_template_count() == 0) {
+      enroll_open("still no finger enrolled");
+    }
+    return;
+  }
+
+  if ((int32_t)(now_ms() - enroll_deadline) >= 0) {
+    printf("main: enrollment window expired\n");
+    config_console_send_line("EVENT ENROLL_TIMEOUT");
+    enroll_finish(false);
+    return;
+  }
+
+  static uint32_t last_poll;
+  if ((now_ms() - last_poll) < FINGERPRINT_POLL_MS) return;
+  last_poll = now_ms();
+
+  bool down = fingerprint_finger_down();
+
+  if (enroll_state == ENROLL_WAIT_LIFT) {
+    // The finger that opened the gate is still on the sensor, and enrolling it
+    // would store a second copy of a template that already exists. Wait for it
+    // to come off, so what gets enrolled is deliberately a different finger.
+    if (!down) enroll_state = ENROLL_WAIT_TOUCH;
+    return;
+  }
+
+  if (!down) return;
+
+  uint16_t slot = fingerprint_template_count();
+  printf("main: enrolling into slot %u\n", (unsigned)slot);
+  config_console_send_line("EVENT ENROLL_CAPTURING");
+  // Blocks until the impressions are done. It pumps USB throughout, so the card
+  // keeps answering, but nothing else in this loop runs — no console, no
+  // button. Acceptable only because we call it with a finger already on the
+  // sensor, so the wait is the enrollment itself rather than the user finding
+  // the device. Worth making properly incremental once there is hardware to
+  // test the state machine against.
+  enroll_finish(fingerprint_enroll(slot, ENROLL_CAPTURE_MS));
 }
 
 // A recognised fingerprint authorises exactly what a button press does.
@@ -173,7 +314,7 @@ static void poll_fingerprint(void) {
 
   printf("main: fingerprint matched slot %u (score %u)\n", slot, score);
   config_console_send_line("EVENT FINGERPRINT");
-  handle_press();
+  note_presence("fingerprint");
 }
 
 // Gives up on pinpad mode when nothing claims the card.
@@ -260,6 +401,22 @@ int main(void) {
   config_console_init();
   usb_ccid_start(piv_handle_apdu);
 
+  // A device with an identity but no enrolled finger cannot authenticate for
+  // anyone, because the button does not do it. So there is no useful state
+  // between blank and enrolled, and nothing is gained by making the user
+  // discover a gesture to leave it: offer enrollment immediately, and keep
+  // offering until it takes.
+  //
+  // This also closes the window the gesture cannot cover. The gate needs a
+  // matching finger, and a device with no templates has none — so first
+  // enrollment can never be authorised by a finger, and would otherwise have to
+  // be authorised by possession alone. Doing it at first boot means there is no
+  // period during which the device is paired and useful but unenrolled, which
+  // is the only period in which appropriating it would be worth anything.
+  if (fingerprint_present() && fingerprint_template_count() == 0) {
+    enroll_open("first boot, no finger enrolled");
+  }
+
   // No RTOS. Everything runs here: USB, the console, and the button. The only
   // rule is that nothing may block long enough to starve tud_task(), which is
   // why the console pumps USB itself while waiting for a press.
@@ -272,7 +429,10 @@ int main(void) {
     status_led_mode_t indicator = led_mode();
     status_led_update(indicator);
     mirror_light(indicator);
-    poll_fingerprint();
+    // Both want the sensor, and an enrollment in progress must not have its
+    // impressions stolen by the authentication poll.
+    if (enroll_state == ENROLL_IDLE) poll_fingerprint();
+    poll_enrollment();
 
     if (usb_ccid_pin_pending()) {
       // The host is waiting on a pinpad PIN entry. Either the user presses now,
@@ -281,7 +441,10 @@ int main(void) {
       // one press is enough.
       bool recent = last_press_ms != 0 &&
                     (now_ms() - last_press_ms) < PRESS_ANSWERS_PINPAD_MS;
-      if (button_pressed() || recent) {
+#if BUTTON_AUTHENTICATES
+      if (button_pressed()) recent = true;
+#endif
+      if (recent) {
         printf("main: answering pinpad PIN entry%s\n", recent ? " (recent press)" : "");
         config_console_send_line("EVENT PINPAD_OK");
         confirm_until_ms = now_ms() + CONFIRM_MS;
@@ -296,8 +459,16 @@ int main(void) {
     }
 
     if (button_pressed()) {
-      last_press_ms = now_ms();
-      handle_press();
+      // The button has exactly two jobs, and neither is authentication: the
+      // factory reset gesture, which is handled at boot, and opening
+      // enrollment. What authorises the enrollment is the finger on the sensor,
+      // not the click.
+      enroll_gate();
+#if BUTTON_AUTHENTICATES
+      // Bench boards with no sensor fitted. Never compiled into a unit that has
+      // one — see BUTTON_AUTHENTICATES in board_config.h.
+      if (!fingerprint_present()) note_presence("button");
+#endif
     }
   }
 }

@@ -26,8 +26,10 @@ a host.
 Not done:
 
 - `fingerprint.c` is written against the EF-01 protocol but **untested against a
-  module**. A board with no sensor reports `fp=absent` and falls back to the
-  button, so one image serves both.
+  module**, and so is the enrollment gesture built on it.
+- A board with no sensor needs `-DBUTTON_AUTHENTICATES=ON` to be usable at all,
+  since the button does not authenticate in a default build. That is a bench
+  build, not a shipping one.
 - Not yet ported to RP2350. Keys generated on an RP2040 are development-only.
 - Secure boot, OTP and debug lockout are not enabled.
 
@@ -119,7 +121,7 @@ the sensor entirely.
 | function | pin |
 | --- | --- |
 | fingerprint module | **GP4** TX, **GP5** RX — UART1, 57600, HLK-ZW111 |
-| presence button | **GP10** to GND, internal pull-up |
+| configuration button | **GP10** to GND, internal pull-up — factory reset and enrollment only, never authentication |
 | indicator LED | **GP16**, WS2812 — redundant once a sensor is fitted, which has its own ring |
 
 The ZW111 harness is six wires, not four:
@@ -209,6 +211,62 @@ trigger it.
 
 A fresh clone needs `PICO_SDK_PATH` set explicitly. An existing `build/`
 directory caches it, so a missing SDK only surfaces on a clean checkout.
+
+## The button does not authenticate
+
+On a unit with a sensor fitted, a fingerprint match is the only thing that
+authorises a signature. The button has two jobs, both configuration: the factory
+reset gesture, and opening fingerprint enrollment.
+
+That is enforced at compile time, not at runtime. A runtime rule — "fall back to
+the button when no module answers" — would mean unplugging the sensor inside the
+case downgrades the device to press-to-authenticate, which is far easier than
+forging the UART link and would defeat the sensor for anyone holding the device.
+Built the default way there is no such path in the binary at all, so removing the
+sensor yields a device that cannot authenticate rather than one that
+authenticates trivially.
+
+Bench boards with no sensor need the button back:
+
+```sh
+cmake -S rp2040 -B build -DBUTTON_AUTHENTICATES=ON
+```
+
+which prints a warning at configure time. Never build a unit that way.
+
+## Enrolling a finger
+
+Adding a finger is the one operation that keeps the key and adds a way to use
+it, so it is the one that has to be authorised. Wiping cannot be abused — it
+destroys the key — but adding a finger to a working device would hand someone a
+credential that answers to them.
+
+**Rest an already-enrolled finger on the sensor and click the button.** The click
+marks intent; the finger authorises it. Then lift, and present the new finger.
+
+| | ring |
+| --- | --- |
+| click, finger matches | two green flashes, then breathing purple |
+| click, finger does not match | one long red flash, nothing opens |
+| click, no finger | nothing — the button alone does not authenticate |
+| waiting for the new finger, 30 s | breathing purple |
+| enrolled | steady green |
+| timed out or failed | steady red, nothing stored |
+
+Two flashes against one carries the accept/reject distinction, with colour only
+reinforcing it: green against red is the pair red-green colourblindness
+collapses, and at the gate that flash is the only feedback there is.
+
+**The first finger is a special case**, because there is nothing yet to match
+against. A device with an identity but no template cannot authenticate for
+anybody, so it opens enrollment by itself at boot and keeps offering until one
+takes. That also removes the window the gesture cannot cover: there is never a
+period in which the device is paired and useful but unenrolled, which is the only
+period in which appropriating it would be worth anything.
+
+**Enroll at least two fingers, ideally from different hands.** There is no
+fallback: a failed sensor or an unavailable finger leaves factory reset as the
+only route, and that destroys the key.
 
 ## Identity
 

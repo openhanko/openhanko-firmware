@@ -73,6 +73,23 @@ target_compile_definitions(smart_card_rp2040 PRIVATE
   PICO_BOOTSEL_VIA_DOUBLE_RESET_TIMEOUT_MS=800
 )
 
+# Bench boards with no fingerprint sensor fitted, where the button has to stand
+# in as the presence check:
+#
+#     cmake -S rp2040 -B build -DBUTTON_AUTHENTICATES=ON
+#
+# Off by default, so a unit built without thinking about it is one whose button
+# cannot authenticate at all. Never turn it on for a unit that has a sensor: it
+# restores exactly the bare-press path the sensor exists to replace.
+option(BUTTON_AUTHENTICATES
+       "Let the button authorise signatures — bench boards with no sensor" OFF)
+if(BUTTON_AUTHENTICATES)
+  message(WARNING
+    "BUTTON_AUTHENTICATES=ON: a button press will authorise signing. "
+    "Bench builds only — never ship this.")
+  target_compile_definitions(smart_card_rp2040 PRIVATE BUTTON_AUTHENTICATES=1)
+endif()
+
 pico_enable_stdio_uart(smart_card_rp2040 1)
 pico_enable_stdio_usb(smart_card_rp2040 0)
 
