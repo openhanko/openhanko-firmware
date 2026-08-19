@@ -567,6 +567,10 @@ it is not secret either.
 
 ## Security posture
 
+The full per-use-case analysis is in [THREAT-MODEL.md](THREAT-MODEL.md); the
+short version:
+
+
 - **A button proves presence, not identity.** While the trigger is the button,
   anyone who can reach the device can authenticate as you. The fingerprint sensor
   is what changes that, and it is untested against hardware.
