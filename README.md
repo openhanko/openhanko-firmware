@@ -579,10 +579,10 @@ short version:
 - **Keys are plaintext in flash** and come straight out over SWD. Closing this is
   what the RP2350's secure boot and debug lockout are for, and none of it is
   enabled yet.
-- **Slot 9d is not presence-gated.** Anything that reaches the device can run a
-  key agreement against it. Deliberate — macOS unwraps the login keychain there
-  right after a press the user already made — but it means a press authorises a
-  session, not a single operation.
+- **A press authorises a session, not a single operation.** Slot 9a consumes its
+  press per signature; slot 9d runs against a 60 s window that use does not
+  consume, because macOS unwraps the login keychain there immediately after the
+  9a signature that logged the user in.
 - Every attack here needs physical access.
 
 ## Layout

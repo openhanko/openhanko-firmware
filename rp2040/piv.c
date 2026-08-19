@@ -91,6 +91,9 @@ static uint8_t chained_p1;
 static uint8_t chained_p2;
 static uint32_t pin_verified_until;
 static uint32_t user_presence_until;
+// Same press, second window. See the key agreement branch for why it cannot
+// share user_presence_until.
+static uint32_t session_presence_until;
 static uint32_t pairing_mode_until;
 static uint32_t challenge_until;
 static uint32_t signature_until;
@@ -98,6 +101,10 @@ static uint32_t signature_until;
 static const uint32_t PIN_VERIFIED_WINDOW_MS = (60000);
 static const uint32_t USER_PRESENCE_WINDOW_MS = (10000);
 static const uint32_t PAIRING_MODE_WINDOW_MS = (120000);
+// Slot 9d's gate. Deliberately longer than the 9a presence window and never
+// consumed: one press has to cover the login and the keychain work that follows
+// it, which arrives in several separate operations over some seconds.
+static const uint32_t SESSION_PRESENCE_WINDOW_MS = (60000);
 static const uint32_t CHALLENGE_WINDOW_MS = (15000);
 static const uint32_t SIGNATURE_ACK_MS = (700);
 
@@ -489,6 +496,7 @@ void piv_note_pin_verified(void) {
 
 void piv_note_user_presence(void) {
   user_presence_until = now_ms() + USER_PRESENCE_WINDOW_MS;
+  session_presence_until = now_ms() + SESSION_PRESENCE_WINDOW_MS;
   // The press answered whatever macOS was asking, so stop asking for it.
   challenge_until = 0;
   trace_event("BUTTON");
@@ -602,10 +610,25 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
   if (key_agreement) {
     // ECDH on P-256: the shared secret is the X coordinate of peer * d.
     //
-    // Not presence-gated, and deliberately. This runs while macOS is opening
-    // the login keychain immediately after a smart-card login the user has
-    // already authorised with a press; demanding a second one there would
-    // simply look broken.
+    // Gated on a press, but against a *separate* window from slot 9a's. Slot 9a
+    // consumes its presence on use, and macOS opens the login keychain here
+    // immediately after the 9a signature that logged the user in — so checking
+    // the same variable would refuse the unwrap that always follows a successful
+    // login. That is exactly the 6982 this branch was ungated to fix.
+    //
+    // So: longer window, never consumed. One press covers the login and the
+    // keychain work after it. What it stops is a host using the key management
+    // key with no interaction whatsoever, which was previously free — and free
+    // to a compromised host, which is the attacker this device exists to resist.
+    if (!window_open(session_presence_until, SESSION_PRESENCE_WINDOW_MS) &&
+        !window_open(pairing_mode_until, PAIRING_MODE_WINDOW_MS)) {
+      LOG("slot 9d refused: no button press within the session window");
+      // Tell the indicator and the driver that a press would help. Note that the
+      // PIN verification is deliberately left standing: consuming it here would
+      // make the retry fail for a second, unrelated reason.
+      note_challenge();
+      return append_sw(response, response_len, response_cap, 0x6982);
+    }
     if (key_type != MBEDTLS_PK_ECKEY) {
       return append_sw(response, response_len, response_cap, 0x6a86);
     }

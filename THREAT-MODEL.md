@@ -75,7 +75,7 @@ Verified in `rp2040/piv.c`:
 | operation | what it requires | what that costs an attacker holding the device |
 | --- | --- | --- |
 | `VERIFY` | any bytes — the PIN is discarded (`(void)data;`), always `9000`, 60 s window | nothing |
-| `GENERAL AUTHENTICATE` **slot 9D** (ECDH) | an open PIN window only | **nothing** |
+| `GENERAL AUTHENTICATE` **slot 9D** (ECDH) | a button press inside a 60 s session window, not consumed on use | one press |
 | `GENERAL AUTHENTICATE` **slot 9A** (sign) | a button press inside a 10 s window | one press, which they perform |
 | `PAIRING_MODE` | a press; then 9A signs freely for 120 s | one press |
 | console config commands | a press, then a 120 s window | one press |
@@ -85,10 +85,14 @@ There is no PIN retry counter and no lockout, because there is no PIN to count
 against. `VERIFY` returns `9000` rather than the `63CX` retries-remaining a
 standard PIV card returns.
 
-**Slot 9D is the sharpest edge.** It is ungated deliberately — macOS unwraps the
-login keychain there immediately after a login the user already authorised, and
-demanding a second press reads as broken. For attacker C that decision hands
-over the key-management key with no interaction at all.
+Slot 9D used to be the sharpest edge: ungated entirely, so a compromised host
+could run key agreement against it silently and at will. It is now gated on a
+press, but against a *separate 60 s window* that signing does not consume —
+because macOS unwraps the login keychain there immediately after the 9A
+signature that logged the user in, and checking 9A's own window would refuse the
+unwrap that always follows a successful login.
+
+Verified on hardware: press → 9A `9000` → 9D `9000` 1.2 s later, no prompts.
 
 ### What does hold today
 
@@ -164,16 +168,12 @@ per session, then touch — not a flag flip.
 
 1. **No real PIN.** Blocks the only defence against attacker C. Needs the at-rest
    work first, which needs RP2350.
-2. **Slot 9D is ungated.** The one item here that is cheap and available now.
-   Gating it on the same presence window the 9A press already opens would close
-   it without a second press — but it must be verified against a real login, as
-   gating 9D is what caused the `6982` regression.
-3. **Key material is plaintext at rest**, and on RP2350-Zero that flash is a
+2. **Key material is plaintext at rest**, and on RP2350-Zero that flash is a
    separate package.
-4. **Sensor untested**, so presence is still a button and proves nothing about
+3. **Sensor untested**, so presence is still a button and proves nothing about
    identity.
-5. **No `PS_ReadINFpage` (`0x16`)**, so no module binding is possible yet.
-6. **No rate limiting** on signature operations.
+4. **No `PS_ReadINFpage` (`0x16`)**, so no module binding is possible yet.
+5. **No rate limiting** on signature operations.
 
 ## 9. Claims we may and may not make
 
