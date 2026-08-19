@@ -303,6 +303,8 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `GENERATE_IDENTITY` | new on-device keypair and certificate |
 | `PROVISION_BEGIN` / `PROVISION_COMMIT` | staged identity upload, used by `provision.py` |
 | `ENROLL <n>` / `FINGERPRINT_ERASE` | fingerprint template management |
+| `FINGERPRINT_INFO` | module serial, firmware, manufacturer, sensor name |
+| `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
 | `PAIRING_MODE` / `PAIRING_MODE_OFF` | sign without a press, for pairing flows |
 | `BOOTLOADER` | reboot to USB mass-storage bootloader |
 | `REBOOT`, `USB_RECONNECT` | as named |
@@ -530,7 +532,7 @@ and what this driver implements:
 | `0x12` | `PS_SetPwd` — persists to flash | no |
 | `0x13` | `PS_VfyPwd` | yes |
 | `0x14` | `PS_GetRandomCode` — module's own hardware RNG | yes |
-| `0x16` | `PS_ReadINFpage` — 512-byte info page, carries a product serial | **no** |
+| `0x16` | `PS_ReadINFpage` — 512-byte info page, carries a product serial | yes, untested |
 | `0x1b` | fast search — ZW1xx only, ZW30xx answers `0x13` | yes |
 | `0x1d` | `PS_TemplateNum` | yes |
 | `0x3c` | `AURALEDCONFIG` — ZW1xx only | yes |
@@ -550,8 +552,15 @@ What raises cost without pretending to be authentication:
 
 - **Bind to the module.** `PS_ReadINFpage` (`0x16`) returns a product serial;
   store a hash of it at pairing and refuse a module that changes. Defeats a swap
-  with a stock module, not an emulator that replays the expected serial. This
-  driver does not implement `0x16` yet, and it is the prerequisite for the rest.
+  with a stock module, not an emulator that replays the expected serial.
+  `0x16` is implemented and reachable as `FINGERPRINT_INFO`, but **untested**,
+  and binding is not wired up — see the open question below.
+
+  **The open question is whether `product_sn` is per-unit or per-model.** If it
+  names the model, binding to it detects a different *kind* of sensor and
+  nothing else, which is far weaker than it sounds. Two modules from the same
+  reel will answer that on the bench in a minute; until then, treat module
+  binding as unproven rather than pending.
 - **Correlate `TouchOut`.** Require the touch line to assert in a plausible
   relationship to the UART response.
 - **Drive the full sequence.** Never trust one confirmation byte; run

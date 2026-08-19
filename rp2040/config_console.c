@@ -254,6 +254,41 @@ static void handle_command(void) {
       send_line("ERR ENROLL");
     }
 
+  } else if (strcmp(command, "FINGERPRINT_INFO") == 0) {
+    // Read-only and reveals nothing secret, so no press gate.
+    fp_info_t info;
+    if (fingerprint_read_info(&info)) {
+      snprintf(line, sizeof(line),
+               "OK FINGERPRINT_INFO sn=\"%s\" sw=\"%s\" mfr=\"%s\" sensor=\"%s\"",
+               info.product_sn, info.sw_version, info.manufacturer, info.sensor_name);
+      send_line(line);
+    } else {
+      send_line("ERR FINGERPRINT_INFO");
+    }
+
+  } else if (strcmp(command, "FINGERPRINT_INFO_RAW") == 0) {
+    // The field offsets in fingerprint_read_info() are guessed by scanning, not
+    // documented. This prints the page so the guess can be checked against a
+    // real module — which is the whole reason it exists.
+    uint8_t page[512];
+    uint16_t len = fingerprint_read_info_page(page, sizeof(page));
+    if (len == 0) {
+      send_line("ERR FINGERPRINT_INFO_RAW");
+    } else {
+      snprintf(line, sizeof(line), "OK FINGERPRINT_INFO_RAW bytes=%u", (unsigned)len);
+      send_line(line);
+      // 32 bytes a line keeps each one inside the console line buffer.
+      for (uint16_t off = 0; off < len; off += 32) {
+        uint16_t n = (uint16_t)(len - off);
+        if (n > 32) n = 32;
+        int w = snprintf(line, sizeof(line), "INFO %03u ", (unsigned)off);
+        for (uint16_t i = 0; i < n; i++) {
+          w += snprintf(line + w, sizeof(line) - (size_t)w, "%02x", page[off + i]);
+        }
+        send_line(line);
+      }
+    }
+
   } else if (strcmp(command, "FINGERPRINT_ERASE") == 0) {
     if (!demand_button_press()) return;
     send_line(fingerprint_erase_all() ? "OK FINGERPRINT_ERASE" : "ERR FINGERPRINT_ERASE");

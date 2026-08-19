@@ -80,3 +80,24 @@ const char *fingerprint_status_text(void);
 // whose own randomness is ring-oscillator jitter — but mix it, never trust it
 // alone: this is an opaque module from a vendor nobody has audited.
 bool fingerprint_random(uint32_t *out);
+
+// Four 8-byte ASCII fields out of the module's info page. Padded strings are
+// trimmed; any field the module leaves blank comes back empty.
+typedef struct {
+  char product_sn[9];
+  char sw_version[9];
+  char manufacturer[9];
+  char sensor_name[9];
+} fp_info_t;
+
+// PS_ReadINFpage (0x16): reads the module's 512-byte info page.
+//
+// UNTESTED against hardware, and the field offsets are a guess in a specific
+// way — see the note in fingerprint.c. Intended for binding the device to one
+// module, but whether that is possible at all depends on product_sn being
+// per-unit rather than per-model, which is exactly what nobody has confirmed.
+bool fingerprint_read_info(fp_info_t *out);
+
+// The info page as the module sent it, for working out where the fields
+// actually live. Returns bytes stored.
+uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);

@@ -19,6 +19,10 @@
 // easy to get subtly wrong and produce a module that simply never answers.
 #define PID_COMMAND 0x01
 #define PID_ACK     0x07
+// A payload larger than one packet arrives as a run of PID_DATA packets closed
+// by a single PID_END. Only PS_ReadINFpage uses this here.
+#define PID_DATA    0x02
+#define PID_END     0x08
 
 #define INS_GET_IMAGE       0x01
 #define INS_IMAGE_TO_BUFFER 0x02
@@ -30,6 +34,7 @@
 #define INS_FAST_SEARCH     0x1b
 #define INS_TEMPLATE_COUNT  0x1d
 #define INS_AURA_LED        0x3c
+#define INS_READ_INFO_PAGE  0x16
 
 // Confirmation codes worth naming; the rest are just "not zero".
 #define CC_OK            0x00
@@ -144,6 +149,58 @@ static uint8_t read_ack(uint8_t *payload, uint8_t payload_cap, uint8_t *payload_
     *payload_len = copy;
   }
   return body[0];
+}
+
+// Reads a PID_DATA/PID_END stream into out, returning bytes stored.
+//
+// Separate from read_ack() rather than folded into it: read_ack rejects any PID
+// that is not an acknowledgement, which is the behaviour every other command
+// wants. Only the info page follows its ack with a stream.
+static uint16_t read_data_stream(uint8_t *out, uint16_t cap, uint32_t timeout_ms) {
+  uint16_t received = 0;
+  uint32_t deadline = now_ms() + timeout_ms;
+
+  for (;;) {
+    uint8_t byte = 0;
+    int state = 0;
+    while (state < 2) {
+      if (!read_byte(&byte, deadline)) return received;
+      if (state == 0) state = (byte == 0xef) ? 1 : 0;
+      else state = (byte == 0x01) ? 2 : (byte == 0xef ? 1 : 0);
+    }
+
+    uint8_t header[7];
+    for (int i = 0; i < 7; i++) {
+      if (!read_byte(&header[i], deadline)) return received;
+    }
+    uint8_t pid = header[4];
+    uint16_t length = ((uint16_t)header[5] << 8) | header[6];
+    if ((pid != PID_DATA && pid != PID_END) || length < 3) return received;
+
+    uint16_t body_len = length - 2;
+    uint8_t body[256];
+    if (body_len > sizeof(body)) return received;
+    for (uint16_t i = 0; i < body_len; i++) {
+      if (!read_byte(&body[i], deadline)) return received;
+    }
+    uint8_t cs_bytes[2];
+    for (int i = 0; i < 2; i++) {
+      if (!read_byte(&cs_bytes[i], deadline)) return received;
+    }
+    uint16_t expected = ((uint16_t)cs_bytes[0] << 8) | cs_bytes[1];
+    if (checksum(pid, header[5], header[6], body, body_len) != expected) return received;
+
+    // Store what fits and keep draining: abandoning the stream mid-flight leaves
+    // the remaining packets in the pipe to be misread as the next reply.
+    if (received < cap) {
+      uint16_t copy = body_len;
+      if (copy > (uint16_t)(cap - received)) copy = (uint16_t)(cap - received);
+      memcpy(out + received, body, copy);
+      received += copy;
+    }
+    if (pid == PID_END) break;
+  }
+  return received;
 }
 
 static uint8_t exchange(uint8_t ins, const uint8_t *params, uint8_t param_len,
@@ -297,6 +354,63 @@ const char *fingerprint_status_text(void) {
   return text;
 }
 
+uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap) {
+  if (!module_present || !out) return 0;
+  // An acknowledgement first, then the page itself as a data stream.
+  uint8_t cc = exchange(INS_READ_INFO_PAGE, NULL, 0, NULL, 0, NULL, 3000);
+  if (cc != CC_OK) {
+    printf("fingerprint: info page refused, cc=%02x\n", cc);
+    return 0;
+  }
+  return read_data_stream(out, cap, 3000);
+}
+
+bool fingerprint_read_info(fp_info_t *out) {
+  if (!out) return false;
+  memset(out, 0, sizeof(*out));
+
+  uint8_t page[512];
+  uint16_t len = fingerprint_read_info_page(page, sizeof(page));
+  if (len < 32) {
+    printf("fingerprint: info page too short (%u bytes)\n", (unsigned)len);
+    return false;
+  }
+
+  // The page layout is not documented anywhere we could find — Hi-Link's
+  // datasheet defers the command set to a protocol note that does not appear to
+  // be published at all. So this scans for the first run of four consecutive
+  // 8-byte printable-ASCII fields, which is what the one open-source driver for
+  // these parts does; evidently its author had no layout either.
+  //
+  // The offset is therefore discovered, not known. First contact with a real
+  // module should dump the whole page and confirm this lands on the intended
+  // four fields rather than on some other ASCII run that happens to come first.
+  uint16_t limit = (uint16_t)((len > 128 ? 128 : len) - 32);
+  for (uint16_t off = 0; off <= limit; off += 8) {
+    bool run_ok = true;
+    for (uint16_t f = 0; f < 32 && run_ok; f++) {
+      uint8_t c = page[off + f];
+      if (c != 0x00 && (c < 0x20 || c > 0x7e)) run_ok = false;
+    }
+    if (!run_ok) continue;
+
+    char *fields[4] = {out->product_sn, out->sw_version,
+                       out->manufacturer, out->sensor_name};
+    for (int f = 0; f < 4; f++) {
+      memcpy(fields[f], page + off + (f * 8), 8);
+      fields[f][8] = '\0';
+      for (int n = 8; n > 0; n--) {
+        if (fields[f][n - 1] == '\0' || fields[f][n - 1] == ' ') fields[f][n - 1] = '\0';
+        else break;
+      }
+    }
+    return true;
+  }
+
+  printf("fingerprint: info page held no recognisable field run\n");
+  return false;
+}
+
 bool fingerprint_random(uint32_t *out) {
   if (!module_present || !out) return false;
   uint8_t payload[8];
@@ -321,6 +435,8 @@ bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) { (void)slot; (void)
 bool fingerprint_erase_all(void) { return false; }
 bool fingerprint_light(fp_light_t e, fp_color_t c, uint8_t n) { (void)e; (void)c; (void)n; return false; }
 bool fingerprint_random(uint32_t *out) { (void)out; return false; }
+bool fingerprint_read_info(fp_info_t *out) { (void)out; return false; }
+uint16_t fingerprint_read_info_page(uint8_t *o, uint16_t c) { (void)o; (void)c; return 0; }
 const char *fingerprint_status_text(void) { return "absent"; }
 
 #endif

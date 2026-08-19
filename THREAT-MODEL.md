@@ -148,7 +148,7 @@ Ordered by what they actually close, not by effort.
 | Secure boot + SWD fused | reading the key off a live device through the debug port | desoldering the flash |
 | **Key wrapped to an OTP secret** | attacker B — flash reader yields ciphertext | attacker C, who has the die and can ask the firmware to sign |
 | OTP **chaffing** (complementary bit pairs) | the IOActive PVC/FIB antifuse read — the one hardware attack **A4 does not fix** | — |
-| Sensor binding via `PS_ReadINFpage` | swapping in a stock module | an emulator replaying the expected serial |
+| Sensor binding via `PS_ReadINFpage` | swapping in a stock module — **only if the serial is per-unit, which is unconfirmed** | an emulator replaying the expected serial |
 | `TouchOut` correlation, staged protocol, timing bounds | replaying one packet on RX | reading the published protocol and driving two lines |
 | **PIN mixed into the wrapping KDF** | **attacker C** — a stolen device is inert, forging a match unwraps nothing | someone who watches the user type the PIN |
 
@@ -172,7 +172,9 @@ per session, then touch — not a flag flip.
    separate package.
 3. **Sensor untested**, so presence is still a button and proves nothing about
    identity.
-4. **No `PS_ReadINFpage` (`0x16`)**, so no module binding is possible yet.
+4. **Module binding unproven.** `PS_ReadINFpage` (`0x16`) is implemented but
+   untested, and it is not known whether the serial it returns is per-unit or
+   per-model. Per-model would make binding nearly worthless.
 5. **No rate limiting** on signature operations.
 
 ## 9. Claims we may and may not make
