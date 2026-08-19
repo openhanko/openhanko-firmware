@@ -305,6 +305,12 @@ static void poll_enrollment(void) {
 static void poll_fingerprint(void) {
   if (!fingerprint_present()) return;
 
+  // With TouchOut wired this is a GPIO read, so the expensive part — a capture
+  // and a search over UART — only happens when a finger is actually present.
+  // Without it, fingerprint_finger_down() is itself a capture attempt and this
+  // is merely where the polling happens.
+  if (fingerprint_touch_wired() && !fingerprint_finger_down()) return;
+
   static uint32_t last_poll;
   if ((now_ms() - last_poll) < FINGERPRINT_POLL_MS) return;
   last_poll = now_ms();

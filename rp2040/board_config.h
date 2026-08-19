@@ -83,6 +83,38 @@
 #define FINGERPRINT_UART_RX 5
 #define FINGERPRINT_BAUD 57600
 
+// The module's TouchOut line (ZW111 pin 2), which asserts while a finger is on
+// the sensor. -1 if it is not wired.
+//
+// Two things come of having it. Cheap: finger detection becomes a GPIO read
+// instead of a PS_GetImage round trip over UART, so the idle poll stops holding
+// a conversation with the module several times a second. And a real, if modest,
+// security gain: a match arriving on TX while this line says nothing is
+// touching the sensor did not come from a finger, so forging one means driving
+// two lines in a plausible time relationship rather than replaying bytes on
+// one. That is cost, not authentication — see THREAT-MODEL.md.
+#define FINGERPRINT_TOUCH_GPIO 6
+
+// Which level means "a finger is on the sensor".
+//
+// UNVERIFIED. The datasheet names the pin and calls it a wake IRQ without
+// giving its polarity, and Hi-Link's protocol note is not published. Guessed
+// active-high, which is the common convention.
+//
+// A wrong guess fails closed — the device decides nothing is ever touching it
+// and refuses to authenticate — rather than open. The pin is also pulled to the
+// inactive level, so an unwired or disconnected TouchOut reads as "no finger"
+// instead of floating. STATUS reports the line as touch=, so if a real module
+// turns out to be active-low the diagnosis takes seconds.
+#define FINGERPRINT_TOUCH_ACTIVE_LEVEL 1
+
+// Whether a match is refused when the touch line disagrees.
+//
+// Kept separate from the pin definition so the correlation can be turned off
+// without unwiring anything, which is what to do first if a module arrives and
+// nothing authenticates.
+#define FINGERPRINT_REQUIRE_TOUCH 1
+
 // Addressable RGB indicator (WS2812) on GP16. Driven by PIO, since the protocol
 // needs sub-microsecond pulse widths the CPU cannot hit reliably alongside USB.
 // Set to -1 to disable.

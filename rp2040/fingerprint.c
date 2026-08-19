@@ -45,6 +45,30 @@
 #define FP_UART (FINGERPRINT_UART_INSTANCE)
 
 static bool module_present;
+
+// Reads the module's TouchOut line, or falls back to asking the module when the
+// line is not wired.
+//
+// The pin is configured with a pull to the inactive level, so a harness with
+// this wire missing reads as "nothing touching" rather than floating between
+// the two.
+static bool touch_line_asserted(void) {
+#if FINGERPRINT_TOUCH_GPIO >= 0
+  return gpio_get(FINGERPRINT_TOUCH_GPIO) == (FINGERPRINT_TOUCH_ACTIVE_LEVEL ? 1 : 0);
+#else
+  return true;  // no line to consult; callers fall back to the UART probe
+#endif
+}
+
+bool fingerprint_touch_wired(void) {
+#if FINGERPRINT_TOUCH_GPIO >= 0
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool fingerprint_touch_asserted(void) { return touch_line_asserted(); }
 static uint16_t template_count;
 
 static uint32_t now_ms(void) {
@@ -219,6 +243,16 @@ void fingerprint_init(void) {
   uart_set_format(FP_UART, 8, 1, UART_PARITY_NONE);
   uart_set_fifo_enabled(FP_UART, true);
 
+#if FINGERPRINT_TOUCH_GPIO >= 0
+  // Pulled to the inactive level on purpose: a missing or cut TouchOut then
+  // reads as "no finger" and the device refuses to authenticate, rather than
+  // floating and occasionally agreeing that someone is there.
+  gpio_init(FINGERPRINT_TOUCH_GPIO);
+  gpio_set_dir(FINGERPRINT_TOUCH_GPIO, GPIO_IN);
+  if (FINGERPRINT_TOUCH_ACTIVE_LEVEL) gpio_pull_down(FINGERPRINT_TOUCH_GPIO);
+  else gpio_pull_up(FINGERPRINT_TOUCH_GPIO);
+#endif
+
   // The module takes a moment after power-up before it will answer.
   sleep_ms(200);
 
@@ -255,11 +289,29 @@ uint16_t fingerprint_template_count(void) {
 
 bool fingerprint_finger_down(void) {
   if (!module_present) return false;
+#if FINGERPRINT_TOUCH_GPIO >= 0
+  // A GPIO read rather than a capture attempt. Called from the main loop several
+  // times a second, this is the difference between a quiet UART and one that is
+  // never idle.
+  return touch_line_asserted();
+#else
   return exchange(INS_GET_IMAGE, NULL, 0, NULL, 0, NULL, 300) == CC_OK;
+#endif
 }
 
 bool fingerprint_verify(uint16_t *slot, uint16_t *score) {
   if (!module_present || template_count == 0) return false;
+
+#if FINGERPRINT_TOUCH_GPIO >= 0 && FINGERPRINT_REQUIRE_TOUCH
+  // A real match requires a finger on the sensor, and a finger on the sensor
+  // asserts this line. A match that arrives while it says otherwise was not
+  // produced by one — which is what someone gets for driving TX alone after
+  // cutting into the harness.
+  //
+  // Checked here rather than at the call site so every path gets it: the
+  // authentication poll, the enrollment gate, and the console.
+  if (!touch_line_asserted()) return false;
+#endif
 
   // GET IMAGE must succeed first; it is also how "no finger" is reported.
   uint8_t cc = exchange(INS_GET_IMAGE, NULL, 0, NULL, 0, NULL, 500);
@@ -279,6 +331,18 @@ bool fingerprint_verify(uint16_t *slot, uint16_t *score) {
   cc = exchange(INS_FAST_SEARCH, params, sizeof(params), payload, sizeof(payload),
                 &payload_len, 2000);
   if (cc != CC_OK || payload_len < 4) return false;
+
+#if FINGERPRINT_TOUCH_GPIO >= 0 && FINGERPRINT_REQUIRE_TOUCH
+  // And again on the way out. The capture and search above take a few hundred
+  // milliseconds, all of which a genuine user spends with a finger on the
+  // sensor, so the line should still be asserted. Requiring it at both ends
+  // means a forged match has to hold the line for the whole exchange rather
+  // than blip it once at the right moment.
+  if (!touch_line_asserted()) {
+    printf("fingerprint: match discarded, touch line released mid-capture\n");
+    return false;
+  }
+#endif
 
   if (slot) *slot = ((uint16_t)payload[0] << 8) | payload[1];
   if (score) *score = ((uint16_t)payload[2] << 8) | payload[3];
@@ -438,5 +502,7 @@ bool fingerprint_random(uint32_t *out) { (void)out; return false; }
 bool fingerprint_read_info(fp_info_t *out) { (void)out; return false; }
 uint16_t fingerprint_read_info_page(uint8_t *o, uint16_t c) { (void)o; (void)c; return 0; }
 const char *fingerprint_status_text(void) { return "absent"; }
+bool fingerprint_touch_wired(void) { return false; }
+bool fingerprint_touch_asserted(void) { return false; }
 
 #endif

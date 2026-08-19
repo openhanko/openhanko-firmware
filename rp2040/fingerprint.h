@@ -101,3 +101,9 @@ bool fingerprint_read_info(fp_info_t *out);
 // The info page as the module sent it, for working out where the fields
 // actually live. Returns bytes stored.
 uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
+
+// Whether the module's TouchOut line is wired on this board, and what it says
+// right now. Reported by STATUS: if a module arrives and never authenticates,
+// this is the first thing to look at — the line's polarity is a guess.
+bool fingerprint_touch_wired(void);
+bool fingerprint_touch_asserted(void);

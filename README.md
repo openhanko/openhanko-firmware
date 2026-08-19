@@ -120,7 +120,7 @@ the sensor entirely.
 
 | function | pin |
 | --- | --- |
-| fingerprint module | **GP4** TX, **GP5** RX — UART1, 57600, HLK-ZW111 |
+| fingerprint module | **GP4** TX, **GP5** RX — UART1, 57600, HLK-ZW111<br>**GP6** TouchOut |
 | configuration button | **GP10** to GND, internal pull-up — factory reset and enrollment only, never authentication |
 | indicator LED | **GP16**, WS2812 — redundant once a sensor is fitted, which has its own ring |
 
@@ -129,16 +129,33 @@ The ZW111 harness is six wires, not four:
 | ZW111 pin | to |
 | --- | --- |
 | 1 `V_Touch` | 3V3 — **permanently powered**, this is what runs finger detection while the rest of the module sleeps |
-| 2 `TouchOut` | not currently wired; asserts on finger contact |
+| 2 `TouchOut` | GP6 — asserts while a finger is on the sensor |
 | 3 `VCC` | 3V3 |
 | 4 `TX` | GP5 (module → MCU) |
 | 5 `RX` | GP4 (MCU → module) |
 | 6 `GND` | GND |
 
-`TouchOut` is the one optional wire. Correlating it with the UART match response
-costs a GPIO and raises the bar for forging a match from "drive RX" to "drive RX
-and a second line in a plausible time relationship". Everything about that link
-is cost-raising rather than authentication — see [the sensor link](#the-sensor-link-cannot-be-authenticated).
+`V_Touch` is a power rail, not an option: it runs finger detection while the
+rest of the module sleeps, so it is in the harness regardless. `TouchOut` is the
+only wire that could have been left out, and is not.
+
+It earns the pin twice. Finger detection becomes a GPIO read instead of a
+`PS_GetImage` round trip, so an idle device stops holding a conversation with
+the module several times a second — and a match is refused unless the line
+agrees that something is touching the sensor, at both the start and the end of
+the capture. That turns forging a match from "replay bytes on RX" into "drive
+two lines in a plausible time relationship". Cost, not authentication — see
+[the sensor link](#the-sensor-link-cannot-be-authenticated).
+
+**The polarity is a guess.** The datasheet names the pin and calls it a wake IRQ
+without saying which level means touched, and Hi-Link's protocol note is not
+published. `FINGERPRINT_TOUCH_ACTIVE_LEVEL` assumes active-high. A wrong guess
+fails closed — nothing ever authenticates — rather than open, and the pin is
+pulled to the inactive level so a cut or unwired TouchOut reads as "no finger"
+instead of floating. `STATUS` reports it as `touch=up|down|unwired`, so putting
+a finger on the sensor and reading `STATUS` settles it in seconds. If it turns
+out to be inverted, flip that define; to rule the correlation out entirely while
+debugging, set `FINGERPRINT_REQUIRE_TOUCH 0`.
 
 ### Which stepping am I holding?
 
@@ -623,8 +640,8 @@ What raises cost without pretending to be authentication:
   nothing else, which is far weaker than it sounds. Two modules from the same
   reel will answer that on the bench in a minute; until then, treat module
   binding as unproven rather than pending.
-- **Correlate `TouchOut`.** Require the touch line to assert in a plausible
-  relationship to the UART response.
+- **Correlate `TouchOut`.** *Implemented.* A match is discarded unless the line
+  says a finger is present, checked before the capture and again after it.
 - **Drive the full sequence.** Never trust one confirmation byte; run
   `GetImage → GenChar → Search` and check each stage against the last.
 - **Bound the timing.** Reject responses that arrive implausibly fast. Bounds

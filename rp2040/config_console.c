@@ -156,8 +156,15 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=button keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s name=\"%s\"",
+             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s name=\"%s\"",
              chip_stepping(),
+             // What actually authorises a signature on this build. The button
+             // only does when compiled in for a bench board with no sensor.
+#if BUTTON_AUTHENTICATES
+             fingerprint_present() ? "fingerprint" : "button",
+#else
+             fingerprint_present() ? "fingerprint" : "none",
+#endif
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
@@ -169,6 +176,8 @@ static void handle_command(void) {
              // the reset gesture can be verified without watching the LED.
              button_held_at_boot() ? "yes" : "no",
              fingerprint_status_text(),
+             !fingerprint_touch_wired() ? "unwired"
+                                        : (fingerprint_touch_asserted() ? "down" : "up"),
              identity_common_name());
     send_line(line);
 

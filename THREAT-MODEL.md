@@ -149,7 +149,7 @@ Ordered by what they actually close, not by effort.
 | **Key wrapped to an OTP secret** | attacker B — flash reader yields ciphertext | attacker C, who has the die and can ask the firmware to sign |
 | OTP **chaffing** (complementary bit pairs) | the IOActive PVC/FIB antifuse read — the one hardware attack **A4 does not fix** | — |
 | Sensor binding via `PS_ReadINFpage` | swapping in a stock module — **only if the serial is per-unit, which is unconfirmed** | an emulator replaying the expected serial |
-| `TouchOut` correlation, staged protocol, timing bounds | replaying one packet on RX | reading the published protocol and driving two lines |
+| `TouchOut` correlation *(done)*, staged protocol, timing bounds | replaying one packet on RX | reading the published protocol and driving two lines |
 | **PIN mixed into the wrapping KDF** | **attacker C** — a stolen device is inert, forging a match unwraps nothing | someone who watches the user type the PIN |
 
 Two notes that are easy to get wrong:
