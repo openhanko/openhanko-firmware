@@ -242,30 +242,12 @@ static void handle_command(void) {
       send_line("ERR GENERATE_IDENTITY");
     }
 
-  } else if (strcmp(command, "FACTORY_RESET") == 0) {
-    // Returns the device to the state it left the factory in, for two cases
-    // that matter: proving a unit works before boxing it, and handing one on to
-    // somebody else.
-    //
-    // The second is why the key is destroyed rather than merely unpaired. A
-    // device that keeps its old key still authenticates as its previous owner
-    // wherever they paired it, and neither party would have any way to notice.
-    //
-    // The reboot completes the chain: on the way back up, a device with no
-    // identity generates a fresh one, so the next owner starts from a key that
-    // has never existed anywhere else.
-    if (!demand_button_press()) return;
-    bool ok = storage_erase();
-    ok = settings_reset() && ok;
-    // Templates too. A device handed on with the previous owner's finger still
-    // enrolled would authorise them on the new owner's account.
-    fingerprint_erase_all();
-    piv_set_pairing_mode(false);
-    config_authorized_until = 0;
-    send_line(ok ? "OK FACTORY_RESET rebooting" : "ERR FACTORY_RESET");
-    if (!ok) return;
-    sleep_ms(150);
-    watchdog_reboot(0, 0, 0);
+  // There is deliberately no FACTORY_RESET here. Erasing a user's credentials
+  // is the one operation a host should not be able to start at all, so the only
+  // path is the button held through power-up (see factory_reset_gesture() in
+  // main.c). A press gate would not be enough: it makes the wipe *cost* a press,
+  // but the host still chooses the moment, and a press the user believes is
+  // authorising something else would serve.
 
   } else if (strcmp(command, "USB_RECONNECT") == 0) {
     send_line("OK USB_RECONNECT");

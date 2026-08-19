@@ -214,13 +214,14 @@ key actually loaded.
 
 ### Factory reset
 
-`FACTORY_RESET` over the console destroys the key, restores every setting to its
-default and reboots, generating a fresh identity on the way back up.
+Hold the button through power-up. There is no console or USB command for this
+and deliberately so — erasing credentials is the one operation a host should not
+be able to start. It destroys the key and the enrolled templates, restores every
+setting to its default, and reboots, generating a fresh identity on the way up.
 
-Without a host: hold the button through power-up. The indicator blinks, faster
-as the deadline approaches, and goes solid at six seconds; **releasing** is what
-commits. Let go early, or keep holding, and nothing happens — once solid,
-unplugging while still holding is the way out.
+The indicator blinks, faster as the deadline approaches, and goes solid at six
+seconds; **releasing** is what commits. Let go early, or keep holding, and
+nothing happens — once solid, unplugging while still holding is the way out.
 
 Release is the commit deliberately. A device wedged against something in a bag
 can hold a button indefinitely but cannot let go.
@@ -259,7 +260,6 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `PROVISION_BEGIN` / `PROVISION_COMMIT` | staged identity upload, used by `provision.py` |
 | `ENROLL <n>` / `FINGERPRINT_ERASE` | fingerprint template management |
 | `PAIRING_MODE` / `PAIRING_MODE_OFF` | sign without a press, for pairing flows |
-| `FACTORY_RESET` | destroy the key, clear settings, reboot |
 | `BOOTLOADER` | reboot to USB mass-storage bootloader |
 | `REBOOT`, `USB_RECONNECT` | as named |
 | `CONFIG_UNLOCK` | required before destructive commands |

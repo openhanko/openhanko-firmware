@@ -122,6 +122,10 @@ static void factory_reset_gesture(void) {
   printf("main: factory reset gesture confirmed; erasing\n");
   storage_erase();
   settings_reset();
+  // Templates too. A device handed on with the previous owner's finger still
+  // enrolled would authorise them on the new owner's account — which is most of
+  // the reason to reset at all.
+  fingerprint_erase_all();
   sleep_ms(50);
   // The identity is regenerated on the way back up, so the device comes back
   // as though it had never been used.
