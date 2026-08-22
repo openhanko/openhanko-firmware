@@ -83,8 +83,13 @@ bool fingerprint_random(uint32_t *out);
 
 // Four 8-byte ASCII fields out of the module's info page. Padded strings are
 // trimmed; any field the module leaves blank comes back empty.
+#define FP_CHIP_SERIAL_LEN 32
+
 typedef struct {
-  char product_sn[9];
+  // The manual calls this Product SN and defines it as "indicate product
+  // model" — it names the part, not the unit, so it is no use for binding.
+  // fingerprint_chip_serial() is the per-unit identity.
+  char product_model[9];
   char sw_version[9];
   char manufacturer[9];
   char sensor_name[9];
@@ -92,15 +97,19 @@ typedef struct {
 
 // PS_ReadINFpage (0x16): reads the module's 512-byte info page.
 //
-// UNTESTED against hardware, and the field offsets are a guess in a specific
-// way — see the note in fingerprint.c. Intended for binding the device to one
-// module, but whether that is possible at all depends on product_sn being
-// per-unit rather than per-model, which is exactly what nobody has confirmed.
+// UNTESTED against hardware, and the field offsets are still a guess: the
+// manual documents the fields and their lengths but not their offsets within
+// the page. Diagnostic only — bind to fingerprint_chip_serial() instead.
 bool fingerprint_read_info(fp_info_t *out);
 
 // The info page as the module sent it, for working out where the fields
 // actually live. Returns bytes stored.
 uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
+
+// PS_GetChipSN: the die's unique 32-byte serial. This is what a device should
+// bind to if it is to notice its sensor being swapped — unlike the info page's
+// Product SN, which the manual defines as a model identifier.
+bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]);
 
 // Whether the module's TouchOut line is wired on this board, and what it says
 // right now. Reported by STATUS: if a module arrives and never authenticates,

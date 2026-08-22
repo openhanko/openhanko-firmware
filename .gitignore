@@ -18,3 +18,6 @@ keys/
 
 # bench build tree (BUTTON_AUTHENTICATES=ON) — never a shipping image
 build-bench/
+
+# Vendor documentation: kept locally, never redistributed.
+*.pdf

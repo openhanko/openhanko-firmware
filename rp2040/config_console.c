@@ -278,11 +278,26 @@ static void handle_command(void) {
     fp_info_t info;
     if (fingerprint_read_info(&info)) {
       snprintf(line, sizeof(line),
-               "OK FINGERPRINT_INFO sn=\"%s\" sw=\"%s\" mfr=\"%s\" sensor=\"%s\"",
-               info.product_sn, info.sw_version, info.manufacturer, info.sensor_name);
+               "OK FINGERPRINT_INFO model=\"%s\" sw=\"%s\" mfr=\"%s\" sensor=\"%s\"",
+               info.product_model, info.sw_version, info.manufacturer, info.sensor_name);
       send_line(line);
     } else {
       send_line("ERR FINGERPRINT_INFO");
+    }
+
+  } else if (strcmp(command, "FINGERPRINT_SN") == 0) {
+    // The per-unit identity, and the one to bind against. Two modules from one
+    // reel must differ here; if they do not, module binding is not possible at
+    // all and the plan for it should be abandoned rather than half-built.
+    uint8_t sn[FP_CHIP_SERIAL_LEN];
+    if (!fingerprint_chip_serial(sn)) {
+      send_line("ERR FINGERPRINT_SN");
+    } else {
+      int w = snprintf(line, sizeof(line), "OK FINGERPRINT_SN ");
+      for (size_t i = 0; i < sizeof(sn); i++) {
+        w += snprintf(line + w, sizeof(line) - (size_t)w, "%02x", sn[i]);
+      }
+      send_line(line);
     }
 
   } else if (strcmp(command, "FINGERPRINT_INFO_RAW") == 0) {

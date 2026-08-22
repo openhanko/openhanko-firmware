@@ -631,39 +631,74 @@ and what this driver implements:
 | `0x05` | `PS_RegModel` | yes |
 | `0x06` | `PS_StoreChar` | yes |
 | `0x0d` | `PS_Empty` — erase all templates | yes |
+| `0x04` | `PS_Search` | yes |
 | `0x0f` | `PS_ReadSysPara` | no |
 | `0x12` | `PS_SetPwd` — persists to flash | no |
 | `0x13` | `PS_VfyPwd` | yes |
 | `0x14` | `PS_GetRandomCode` — module's own hardware RNG | yes |
-| `0x16` | `PS_ReadINFpage` — 512-byte info page, carries a product serial | yes, untested |
-| `0x1b` | fast search — ZW1xx only, ZW30xx answers `0x13` | yes |
+| `0x16` | `PS_ReadINFpage` — parameter page; its Product SN is a **model** string | yes, untested |
+| `0x34` | `PS_GetChipSN` — 32-byte per-die serial | yes, untested |
+| `0x0e` | `PS_WriteReg` — register 7 is the encryption level | no |
+| `0xe0`–`0xe4` | safety instruction set: key pair, lock, ciphertext, secure store/search | no |
 | `0x1d` | `PS_TemplateNum` | yes |
 | `0x3c` | `AURALEDCONFIG` — ZW1xx only | yes |
 
-There is **no encrypted or authenticated mode**. The 4-byte password is sent in
-clear on every power-up, so it is capturable on the first transaction; it is a
-speed bump, not a secret. An attacker holding the device can cut the harness and
-speak the protocol directly, and the module will tell them anything it would
-tell us.
+**As shipped, at encryption level 0, there is no authenticated mode.** The
+4-byte password is not merely sent in clear on every power-up — it is *readable*
+from the parameter page, so an attacker does not even need to be listening at
+the right moment. A forged match response makes the device sign, and secure
+boot, SWD lockout and encryption at rest all keep working correctly because none
+of them are in that path.
 
-So a forged match response makes the device sign. Secure boot, SWD lockout, OTP
-protection and encryption at rest all keep working correctly — they are simply
-not in that path. **The honest claim is: resists a compromised host, resists
+**But the module can do better, and this is the open lead.** Hi-Link's protocol
+manual documents a *safety instruction set* (`0xE0`–`0xE4`) and an encryption
+level held in register 7:
+
+| level | algorithm |
+| --- | --- |
+| 0 | none — everything except the safety set |
+| 1 | none, and no template upload/download |
+| 2 | SM4 (ECB) |
+| 3 | AES-128 (ECB) |
+| 4 | 3DES (ECB) |
+| 20 | RSA-1024 |
+| 21 | ECC P-256 |
+
+At levels 2 and above the module refuses the ordinary commands entirely — no
+`PS_Search`, no `PS_StoreChar`, no auto-registration — and answers only the
+safety set, so enrolment and verification both move to `PS_SecurityStoreChar`
+and `PS_SecuritySearch`. `PS_GetKeyt` generates the key material, and
+**`PS_LockKeyt` then refuses to ever issue another pair**, which is what makes it
+worth anything: provision at assembly, lock, and a later attacker cannot ask the
+module for a fresh key.
+
+Three things stand between that and a real defence, all unresolved:
+
+- **Whether the ZW111 supports it at all.** The manual is written for Hi-Link's
+  whole range and says only that "some fingerprint module products based on
+  security chips" have it. Read register 7 and try `PS_GetKeyt`: `0x31` means
+  the function does not match the encryption level.
+- **The level is one-way.** "Changes are not allowed after setting." Set it wrong
+  on a unit and that unit is what it is.
+- **ECB.** Every symmetric level is ECB, which is deterministic and unauthenticated.
+  Whether that is a channel worth trusting depends on how the challenge-response
+  is constructed on top of it, and a random-nonce protocol can be sound over a
+  bad mode — but it is not a detail to wave through.
+
+Until then the honest claim is unchanged: **resists a compromised host, resists
 offline key extraction, does not resist physical possession.**
 
 What raises cost without pretending to be authentication:
 
-- **Bind to the module.** `PS_ReadINFpage` (`0x16`) returns a product serial;
-  store a hash of it at pairing and refuse a module that changes. Defeats a swap
-  with a stock module, not an emulator that replays the expected serial.
-  `0x16` is implemented and reachable as `FINGERPRINT_INFO`, but **untested**,
-  and binding is not wired up — see the open question below.
+- **Bind to the module.** `PS_GetChipSN` (`0x34`) returns a 32-byte serial the
+  manual describes as unique to the die. Store a hash at pairing and refuse a
+  module that changes. Defeats a swap with a stock module, not an emulator that
+  replays the expected serial. Implemented as `FINGERPRINT_SN`, untested.
 
-  **The open question is whether `product_sn` is per-unit or per-model.** If it
-  names the model, binding to it detects a different *kind* of sensor and
-  nothing else, which is far weaker than it sounds. Two modules from the same
-  reel will answer that on the bench in a minute; until then, treat module
-  binding as unproven rather than pending.
+  Not the info page's Product SN, which the manual defines as "indicate product
+  model" — it names the part, not the unit, and binding to it would detect only a
+  different *kind* of sensor. Confirm on the bench that two modules from one reel
+  differ before trusting either.
 - **Correlate `TouchOut`.** *Implemented.* A match is discarded unless the line
   says a finger is present, checked before the capture and again after it.
 - **Drive the full sequence.** Never trust one confirmation byte; run

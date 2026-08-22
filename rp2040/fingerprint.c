@@ -31,7 +31,13 @@
 #define INS_ERASE_ALL       0x0d
 #define INS_VERIFY_PASSWORD 0x13
 #define INS_GET_RANDOM      0x14
-#define INS_FAST_SEARCH     0x1b
+// PS_Search. Was 0x1b, taken from a third-party library that calls it a
+// "high-speed search" — Hi-Link's protocol manual has no such command, and the
+// only 0x1b in it is an error code. Left alone, every verification would have
+// failed against a real module for a reason that looks like a broken sensor.
+#define INS_SEARCH          0x04
+// PS_GetChipSN: 32 bytes, unique per die.
+#define INS_CHIP_SERIAL     0x34
 #define INS_TEMPLATE_COUNT  0x1d
 #define INS_AURA_LED        0x3c
 #define INS_READ_INFO_PAGE  0x16
@@ -324,11 +330,11 @@ bool fingerprint_verify(uint16_t *slot, uint16_t *score) {
     return false;
   }
 
-  // Search the whole bank: buffer, start page (high/low), count (high/low).
+  // PS_Search: buffer id, start page (high/low), page count (high/low).
   uint8_t params[5] = {1, 0x00, 0x00, (uint8_t)(0xff), (uint8_t)(0xff)};
   uint8_t payload[8];
   uint8_t payload_len = 0;
-  cc = exchange(INS_FAST_SEARCH, params, sizeof(params), payload, sizeof(payload),
+  cc = exchange(INS_SEARCH, params, sizeof(params), payload, sizeof(payload),
                 &payload_len, 2000);
   if (cc != CC_OK || payload_len < 4) return false;
 
@@ -429,6 +435,19 @@ uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap) {
   return read_data_stream(out, cap, 3000);
 }
 
+bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]) {
+  if (!module_present || !out) return false;
+  // One reserved parameter byte, per the manual's packet layout.
+  uint8_t param = 0;
+  uint8_t payload[FP_CHIP_SERIAL_LEN];
+  uint8_t payload_len = 0;
+  if (exchange(INS_CHIP_SERIAL, &param, 1, payload, sizeof(payload), &payload_len,
+               1000) != CC_OK || payload_len < FP_CHIP_SERIAL_LEN) {
+    return false;
+  }
+  memcpy(out, payload, FP_CHIP_SERIAL_LEN);
+  return true;
+}
 bool fingerprint_read_info(fp_info_t *out) {
   if (!out) return false;
   memset(out, 0, sizeof(*out));
@@ -458,7 +477,7 @@ bool fingerprint_read_info(fp_info_t *out) {
     }
     if (!run_ok) continue;
 
-    char *fields[4] = {out->product_sn, out->sw_version,
+    char *fields[4] = {out->product_model, out->sw_version,
                        out->manufacturer, out->sensor_name};
     for (int f = 0; f < 4; f++) {
       memcpy(fields[f], page + off + (f * 8), 8);
@@ -500,6 +519,7 @@ bool fingerprint_erase_all(void) { return false; }
 bool fingerprint_light(fp_light_t e, fp_color_t c, uint8_t n) { (void)e; (void)c; (void)n; return false; }
 bool fingerprint_random(uint32_t *out) { (void)out; return false; }
 bool fingerprint_read_info(fp_info_t *out) { (void)out; return false; }
+bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]) { (void)out; return false; }
 uint16_t fingerprint_read_info_page(uint8_t *o, uint16_t c) { (void)o; (void)c; return 0; }
 const char *fingerprint_status_text(void) { return "absent"; }
 bool fingerprint_touch_wired(void) { return false; }
