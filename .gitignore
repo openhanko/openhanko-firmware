@@ -15,3 +15,6 @@ keys/
 */sdkconfig
 */sdkconfig.old
 .cache/
+
+# bench build tree (BUTTON_AUTHENTICATES=ON) — never a shipping image
+build-bench/
