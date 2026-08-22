@@ -464,8 +464,15 @@ TRACE 429183 APDU ins=87 p1=11 p2=9a sw=9000    signed
 580 ms press to signature, with nothing installed. macOS labels the prompt
 *"Certificate For PIV Authentication (…)"*, which is `pivtoken`'s own format.
 
-The PIN is `000000` and is not a secret — `VERIFY` accepts anything. The button
-is the only gate.
+The PIN is six random digits, generated fresh for each prompt, and is not a
+secret: `VERIFY` discards the bytes and accepts anything. The presence check is
+the only gate.
+
+Random rather than fixed because a fixed PIN teaches a number that looks like it
+means something. It does not — typing it by hand authenticates nothing, since the
+signature that follows still waits on a finger. The practical corollary is worth
+knowing: if you ever face a PIN box the device did not fill in, **any six digits
+will do**.
 
 ## Indicator
 
@@ -562,8 +569,8 @@ signature, with **no `VERIFY` at all** — nothing was typed.
 
 What is *not* solved is applications that put up their own PIN field. Chrome's
 password manager unlocks correctly but still shows a modal and takes the typed
-`000000`; pinpad governs the CryptoTokenKit-to-card leg, and an application that
-collects a PIN itself never reaches it.
+its six random digits; pinpad governs the CryptoTokenKit-to-card leg, and an
+application that collects a PIN itself never reaches it.
 
 ### Testing caveat
 

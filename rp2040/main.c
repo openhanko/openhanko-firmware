@@ -6,6 +6,7 @@
 #include "fingerprint.h"
 #include "identity.h"
 #include "hardware/watchdog.h"
+#include "pico/rand.h"
 #include "pico/stdlib.h"
 #include "piv.h"
 #include "settings.h"
@@ -54,6 +55,25 @@ static status_led_mode_t led_mode(void) {
   return STATUS_LED_OFF;
 }
 
+// Six random digits for the PIN prompt.
+//
+// The card accepts any PIN, so this value authenticates nothing and is not a
+// secret — the presence check is the whole gate. It is random rather than fixed
+// so that nobody learns a number and comes to believe it matters: someone who
+// knows "the PIN is 000000" knows something untrue, and typing it by hand
+// achieves nothing, because the signature that follows still waits on a finger.
+//
+// One draw covers six digits; get_rand_64() is ring-oscillator jitter on an
+// RP2040, which is not good enough for a key and far better than needed here.
+static void random_pin(char *out, size_t digits) {
+  uint64_t r = get_rand_64();
+  for (size_t i = 0; i < digits; i++) {
+    out[i] = (char)('0' + (uint8_t)(r % 10));
+    r /= 10;
+  }
+  out[digits] = '\0';
+}
+
 // The single funnel for "the user proved they are here". On a production unit
 // the only caller is a fingerprint match; BUTTON_AUTHENTICATES adds the button
 // back for bench boards with no sensor.
@@ -69,7 +89,9 @@ static void note_presence(const char *source) {
   printf("main: presence from %s; authorizing PIV and typing the dummy PIN\n", source);
   config_console_send_line("EVENT PRESS");
   piv_note_user_presence();
-  if (!usb_hid_type_line(PIV_DUMMY_PIN)) {
+  char pin[PIV_DUMMY_PIN_DIGITS + 1];
+  random_pin(pin, PIV_DUMMY_PIN_DIGITS);
+  if (!usb_hid_type_line(pin)) {
     printf("main: HID interface was not ready; PIN not typed\n");
     config_console_send_line("EVENT PIN_NOT_TYPED");
   }

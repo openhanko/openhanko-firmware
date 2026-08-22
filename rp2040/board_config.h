@@ -132,4 +132,12 @@
 
 // The PIV PIN macOS insists on collecting. Not a secret, and not your account
 // password: the button press is the real gate.
-#define PIV_DUMMY_PIN "000000"
+// How many digits the device types when a host asks for a PIN.
+//
+// The digits themselves are random and generated fresh for every prompt, so
+// there is no value to define here. The card accepts any PIN — handle_verify()
+// discards the bytes — so a fixed one would carry no more meaning than a random
+// one, and would teach the user a number that looks like it means something.
+//
+// Six is the PIV minimum and what hosts expect.
+#define PIV_DUMMY_PIN_DIGITS 6
