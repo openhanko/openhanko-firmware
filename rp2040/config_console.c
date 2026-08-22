@@ -149,13 +149,18 @@ static bool append_provision_chunk(char *arguments) {
 }
 
 static void handle_command(void) {
-  char line[192];
+  // Sized for the STATUS line, which is the longest thing sent from here and
+  // has grown twice. snprintf truncates in silence, so a field added without
+  // room simply loses the tail of the line — which is where the device name
+  // lives, and it looked like a quoting bug rather than a buffer one. The guard
+  // below turns the next occurrence into an obvious error instead.
+  char line[320];
 
   if (strcmp(command, "PING") == 0) {
     send_line("PONG");
 
   } else if (strcmp(command, "STATUS") == 0) {
-    snprintf(line, sizeof(line),
+    int status_len = snprintf(line, sizeof(line),
              "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s name=\"%s\"",
              chip_stepping(),
              // What actually authorises a signature on this build. The button
@@ -179,6 +184,11 @@ static void handle_command(void) {
              !fingerprint_touch_wired() ? "unwired"
                                         : (fingerprint_touch_asserted() ? "down" : "up"),
              identity_common_name());
+    if (status_len >= (int)sizeof(line)) {
+      // Say so rather than sending a line that looks complete and is not.
+      send_line("ERR STATUS truncated: grow line[]");
+      return;
+    }
     send_line(line);
 
   } else if (strcmp(command, "CONFIG_UNLOCK") == 0) {
