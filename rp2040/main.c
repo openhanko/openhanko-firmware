@@ -97,6 +97,10 @@ static void note_presence(const char *source) {
   }
 }
 
+// Slowest the ring is repainted during the reset gesture. Each repaint is a
+// UART exchange, so the blink cannot be driven at the 5 ms the loop runs at.
+#define RING_MIN_INTERVAL_MS 60
+
 // Erases the device on a long press held through power-up.
 //
 // The only destructive action available without a host, so it is deliberately
@@ -119,6 +123,19 @@ static void factory_reset_gesture(void) {
   bool lit = false;
   bool armed = false;
 
+  // On the production board there is no discrete LED, so this gesture would run
+  // with no feedback at all — an irreversible operation, invisible. The
+  // accelerating blink exists precisely to warn that one is approaching, so it
+  // has to reach the module's ring.
+  //
+  // Rate-limited because each call is a UART exchange, and the half-period falls
+  // to 50 ms near the end. Skipping a toggle simply leaves the ring in its last
+  // state a little longer, which reads as the blink saturating rather than as a
+  // fault. Untested against a module: the timing here is the part most likely to
+  // need adjusting once one exists.
+  uint32_t last_ring_ms = 0;
+  bool ring_lit = false;
+
   while (button_is_down()) {
     uint32_t now = now_ms();
     uint32_t step = now - last;
@@ -126,6 +143,12 @@ static void factory_reset_gesture(void) {
     uint32_t held = now - started;
 
     if (held >= RESET_ARM_MS) {
+      if (!armed) {
+        // Solid, once, on the transition. "Armed, release to erase" has to be
+        // unmistakably different from the blinking that preceded it.
+        fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0);
+        ring_lit = true;
+      }
       armed = true;
       status_led_update(STATUS_LED_ARMED);
       sleep_ms(5);
@@ -145,10 +168,17 @@ static void factory_reset_gesture(void) {
       lit = !lit;
     }
     status_led_update(lit ? STATUS_LED_ARMED : STATUS_LED_OFF);
+    if (lit != ring_lit && (now - last_ring_ms) >= RING_MIN_INTERVAL_MS) {
+      ring_lit = lit;
+      last_ring_ms = now;
+      fingerprint_light(lit ? FP_LIGHT_STEADY : FP_LIGHT_OFF,
+                        lit ? FP_LED_RED : FP_LED_OFF, 0);
+    }
     sleep_ms(5);
   }
 
   status_led_update(STATUS_LED_OFF);
+  fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0);
   if (!armed) return;  // let go too early, or thought better of it
 
   printf("main: factory reset gesture confirmed; erasing\n");

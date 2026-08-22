@@ -35,7 +35,9 @@
 #define BUTTON_AUTHENTICATES 0
 #endif
 
-#define BUTTON_GPIO 10
+#ifndef BUTTON_GPIO
+#define BUTTON_GPIO 12
+#endif
 #define BUTTON_ACTIVE_LEVEL 0
 #define BUTTON_PULL_UP 1
 
@@ -122,7 +124,13 @@
 // It breathes only while the reader is waiting for a press. With pinpad PIN
 // entry macOS shows no prompt at all, so without this the device gives the user
 // nothing to react to.
-#define STATUS_LED_GPIO 16
+// -1 on the production board, which has no discrete LED: the fingerprint
+// module's own ring is the entire indicator, and anything on the PCB would be
+// inside a sealed case where nobody can see it. status_led.c compiles to
+// no-ops, and every indication goes through mirror_light() to the ring.
+#ifndef STATUS_LED_GPIO
+#define STATUS_LED_GPIO -1
+#endif
 #define STATUS_LED_BRIGHTNESS 72
 // Colour weights, multiplied by the brightness ramp.
 #define STATUS_LED_COLOR_R 0

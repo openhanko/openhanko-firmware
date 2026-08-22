@@ -121,8 +121,25 @@ the sensor entirely.
 | function | pin |
 | --- | --- |
 | fingerprint module | **GP4** TX, **GP5** RX — UART1, 57600, HLK-ZW111<br>**GP6** TouchOut |
-| configuration button | **GP10** to GND, internal pull-up — factory reset and enrollment only, never authentication |
-| indicator LED | **GP16**, WS2812 — redundant once a sensor is fitted, which has its own ring |
+| configuration button | **GP12** to GND, internal pull-up — factory reset and enrollment only, never authentication |
+| indicator | none on the board: the module's own ring is the entire indicator |
+
+There is no discrete LED. A production unit is a sealed case, so anything on the
+PCB would be invisible; `STATUS_LED_GPIO` is `-1` and `status_led.c` compiles to
+no-ops. Every indication goes to the module's ring, including the factory reset
+gesture — which had driven only the board LED, and would otherwise have run an
+irreversible operation with no feedback at all.
+
+The RP2040-Zero development board differs in exactly those places, so it has its
+own build:
+
+```sh
+cmake -S rp2040 -B build-bench -DBENCH_BOARD=ON
+```
+
+which moves the button to GP10, enables the WS2812 on GP16, and lets the button
+authenticate because there is no sensor fitted. It warns at configure time.
+Never ship an image built that way.
 
 The ZW111 harness is six wires, not four:
 

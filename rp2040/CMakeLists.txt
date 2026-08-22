@@ -90,6 +90,26 @@ if(BUTTON_AUTHENTICATES)
   target_compile_definitions(smart_card_rp2040 PRIVATE BUTTON_AUTHENTICATES=1)
 endif()
 
+# The RP2040-Zero development board, which differs from the production board in
+# all the ways that matter to the pinout:
+#
+#     cmake -S rp2040 -B build-bench -DBENCH_BOARD=ON
+#
+# Its button is on GP10 rather than GP12, it has a WS2812 on GP16 where the
+# production board has no discrete LED at all, and with no fingerprint module
+# fitted the button has to stand in as the presence check.
+option(BENCH_BOARD "RP2040-Zero bench board: GP10 button, WS2812 on GP16" OFF)
+if(BENCH_BOARD)
+  message(WARNING
+    "BENCH_BOARD=ON: bench pinout, and the button authorises signing. "
+    "Never ship this.")
+  target_compile_definitions(smart_card_rp2040 PRIVATE
+    BUTTON_AUTHENTICATES=1
+    BUTTON_GPIO=10
+    STATUS_LED_GPIO=16
+  )
+endif()
+
 pico_enable_stdio_uart(smart_card_rp2040 1)
 pico_enable_stdio_usb(smart_card_rp2040 0)
 
