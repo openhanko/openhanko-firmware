@@ -681,9 +681,9 @@ the right moment. A forged match response makes the device sign, and secure
 boot, SWD lockout and encryption at rest all keep working correctly because none
 of them are in that path.
 
-**But the module may be able to do better, and this is the open lead.**
-Hi-Link's protocol manual documents a *safety instruction set* (`0xE0`–`0xE4`)
-and an encryption level held in register 7:
+**The manual describes a way out. These modules do not have it.** Hi-Link
+documents a *safety instruction set* (`0xE0`–`0xE4`) and an encryption level in
+register 7:
 
 | level | algorithm |
 | --- | --- |
@@ -733,40 +733,46 @@ where the firmware can read them. That is the standing gap, not a new one.
 
 ### What is unresolved
 
-- **Whether the ZW111 supports any of it.** Open, and the first answer was
-  ambiguous. `FINGERPRINT_SECPROBE` sends `PS_GetCiphertext`; the module replies
-  `0x00`, which for this command means "subsequent data packets will be sent" —
-  and then sends nothing.
+### The answer, for these modules: no
 
-  Two readings fit. The module implements the set and has nothing to send at
-  `SecurLevel 0`, or `0x00` is what this firmware returns for any opcode its
-  dispatcher does not handle. The second is an ordinary shortcut and says
-  nothing about the part: the manual scopes the set to "some fingerprint module
-  products based on security chips", so a genuine module whose build omits it
-  answers exactly this way.
+`FINGERPRINT_SECPROBE` sends `PS_GetCiphertext` and reads what comes back. The
+module replies `0x00` — which for that command means "subsequent data packets
+will be sent" — and then sends nothing. On its own that is ambiguous: either the
+set is implemented with nothing to send at `SecurLevel 0`, or `0x00` is what the
+firmware says to an opcode it does not handle.
 
-  The probe therefore also sends `0x7F`, an opcode outside every range the
-  manual assigns. **Different codes** mean the dispatcher discriminates and
-  `0xE2` reached a real handler; **the same code** means `0x00` is this
-  firmware's answer to anything it does not implement. A fault on our side is
-  already excluded — `PS_ReadINFpage` returns 512 bytes through the same stream
-  path and works.
+The probe therefore also sends `0x7F`, which is outside every range the manual
+assigns. It answers `0x00` too.
 
-  If it turns out to be real, the question gets better rather than harder: a set
-  that answers at level 0 might let `PS_SecuritySearch` run *alongside* the
-  ordinary commands, and the whole cost of level 3 — losing `PS_AutoEnroll`,
-  rebuilding enrolment — would not have to be paid. What decides that is whether
-  `PS_GetKeyt` also answers at level 0, and that one clears enrolled templates as
-  its first act, so it is a spare-module experiment.
-- **The level is one-way.** "Changes are not allowed after setting." A module set
-  to a level whose protocol we cannot implement is finished — and if the set
-  works at level 0, there may be no reason to set one.
-- **Which level.** 3 (AES-128) is the one to want: mbedTLS already has AES, SM4
-  is not in it at all, 3DES at level 4 is weak, and levels 20 and 21 return
-  128-byte responses on a protocol the manual describes inconsistently.
+That settles it. The dispatcher is not indiscriminate — `PS_GetImage` returns
+`0x02` for "no finger", and the idle poll depends on exactly that — so this is a
+firmware that answers known opcodes properly and unknown ones with `0x00`, and
+`0xE2` is in the second group. Nor is it a fault on our side: `PS_ReadINFpage`
+returns 512 bytes through the same stream path and works.
 
-Until that probe answers, the honest claim is unchanged: **resists a compromised
-host, resists offline key extraction, does not resist physical possession.**
+**The safety instruction set is not in this build.** That is consistent with the
+manual, which scopes it to "some fingerprint module products based on security
+chips" and never claims the ZW111 is one of them. It says nothing about the part
+being genuine.
+
+So the encryption levels are moot here, and the questions that mattered while
+the lead was open — which level, whether the one-way write is worth it, whether
+losing `PS_AutoEnroll` is affordable — do not arise. `FINGERPRINT_SECPROBE`
+stays because it is the one thing to run on a module from a different line.
+
+The honest claim is unchanged, and now unlikely to change on this hardware:
+**resists a compromised host, resists offline key extraction, does not resist
+physical possession.**
+
+Two routes remain, and only one of them is ours:
+
+- **A module that has the security chip.** Which Hi-Link product line carries it
+  is a question for Hi-Link, and one email settles what more probing cannot.
+- **Make a forged match worth less.** If the link cannot be authenticated, the
+  answer it carries has to stop being sufficient — which is a PIN mixed into the
+  key-wrapping KDF, so that a forged match unwraps nothing. That was already the
+  first gap in [THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered); this makes it
+  the only one that closes anything here.
 
 What raises cost without pretending to be authentication:
 
