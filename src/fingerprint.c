@@ -59,6 +59,10 @@
 #define CC_NOT_EMPTY      0x22
 #define CC_DB_FULL        0x1f
 #define CC_TIMEOUT        0x26
+// Safety instruction set, 0xE0-0xE4. Only 0xE2 is issued here, and only to ask
+// whether the module knows the opcode at all — see fingerprint_security_probe().
+#define INS_SEC_GET_CIPHERTEXT 0xe2
+
 #define INS_TEMPLATE_COUNT  0x1d
 #define INS_AURA_LED        0x3c
 #define INS_READ_INFO_PAGE  0x16
@@ -761,6 +765,29 @@ bool fingerprint_read_info(fp_info_t *out) {
   return true;
 }
 
+uint8_t fingerprint_security_probe(void) {
+  if (!module_present) return 0xff;
+  // PS_GetCiphertext at encryption level 0, purely to read the refusal.
+  //
+  // The manual describes a safety instruction set — a challenge-response that
+  // would make the sensor link forgeable only with a key — but hedges it to
+  // "some fingerprint module products based on security chips", and both modules
+  // here report SecurLevel 0. Whether a ZW111 has it at all is the one fact the
+  // whole design depends on, and this is the cheapest way to learn it: a module
+  // that implements the set knows the opcode and refuses it for the level
+  // (0x31), or reports that no key exists yet (0x2e). One that does not
+  // implement it cannot recognise the instruction and answers 0x01.
+  //
+  // 0xE2 specifically, because it is the only member of the set that is harmless
+  // if a module executes it anyway: it generates a random number and encrypts
+  // it. 0xE0 clears enrolled templates as its first act, and 0xE1 is
+  // irreversible.
+  uint8_t payload[32];
+  uint8_t payload_len = 0;
+  return exchange(INS_SEC_GET_CIPHERTEXT, NULL, 0, payload, sizeof(payload),
+                  &payload_len, 1000);
+}
+
 bool fingerprint_random(uint32_t *out) {
   if (!module_present || !out) return false;
   uint8_t payload[8];
@@ -785,6 +812,7 @@ bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) { (void)slot; (void)
 bool fingerprint_erase_all(void) { return false; }
 bool fingerprint_light(fp_light_t e, fp_color_t c, uint8_t n) { (void)e; (void)c; (void)n; return false; }
 bool fingerprint_random(uint32_t *out) { (void)out; return false; }
+uint8_t fingerprint_security_probe(void) { return 0xff; }
 bool fingerprint_read_info(fp_info_t *out) { (void)out; return false; }
 bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]) { (void)out; return false; }
 uint16_t fingerprint_read_info_page(uint8_t *o, uint16_t c) { (void)o; (void)c; return 0; }

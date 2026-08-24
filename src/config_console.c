@@ -230,6 +230,19 @@ static void handle_command(void) {
                                         : (fingerprint_touch_asserted() ? "down" : "up"));
     send_line(line);
 
+  } else if (strcmp(command, "FINGERPRINT_SECPROBE") == 0) {
+    // Read-only, and the answer decides whether the sensor link can ever be
+    // authenticated on this part. See fingerprint_security_probe().
+    uint8_t cc = fingerprint_security_probe();
+    const char *reading =
+        cc == 0xff ? "no_module" :
+        cc == 0x31 ? "supported_wrong_level" :
+        cc == 0x2e ? "supported_no_key" :
+        cc == 0x01 ? "not_implemented" : "unexpected";
+    snprintf(line, sizeof(line), "OK FINGERPRINT_SECPROBE cc=%02x %s seclevel_from=INFO",
+             cc, reading);
+    send_line(line);
+
   } else if (strcmp(command, "FINGERPRINT_SN") == 0) {
     // The per-unit identity, and the one to bind against. Two modules from one
     // reel must differ here; if they do not, module binding is not possible at

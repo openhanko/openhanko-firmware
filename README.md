@@ -334,6 +334,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `FINGERPRINT_PROBE` | re-run the link probe and report what answered |
 | `FINGERPRINT_INFO` | model, firmware, manufacturer, sensor name |
 | `FINGERPRINT_SN` | the module's per-die serial — what binding is against |
+| `FINGERPRINT_SECPROBE` | whether this module implements the safety instruction set |
 | `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
 | `OTP_STATUS` | whether the device holds a secret, and which one, by hash |
 | `AID_MODE standard\|pinpad` | force the AID mode instead of letting the probe decide |
@@ -656,9 +657,9 @@ the right moment. A forged match response makes the device sign, and secure
 boot, SWD lockout and encryption at rest all keep working correctly because none
 of them are in that path.
 
-**But the module can do better, and this is the open lead.** Hi-Link's protocol
-manual documents a *safety instruction set* (`0xE0`–`0xE4`) and an encryption
-level held in register 7:
+**But the module may be able to do better, and this is the open lead.**
+Hi-Link's protocol manual documents a *safety instruction set* (`0xE0`–`0xE4`)
+and an encryption level held in register 7:
 
 | level | algorithm |
 | --- | --- |
@@ -670,29 +671,60 @@ level held in register 7:
 | 20 | RSA-1024 |
 | 21 | ECC P-256 |
 
-At levels 2 and above the module refuses the ordinary commands entirely — no
-`PS_Search`, no `PS_StoreChar`, no auto-registration — and answers only the
-safety set, so enrolment and verification both move to `PS_SecurityStoreChar`
-and `PS_SecuritySearch`. `PS_GetKeyt` generates the key material, and
-**`PS_LockKeyt` then refuses to ever issue another pair**, which is what makes it
-worth anything: provision at assembly, lock, and a later attacker cannot ask the
-module for a fresh key.
+At levels 2 and above the module stops answering the ordinary commands
+altogether. The manual is explicit about which: no template upload or download,
+no image download, no precise comparison, no `PS_Search`, no `PS_StoreChar`, and
+**no automatic registration or verification**. Enrolment and verification both
+move into the safety set, and `PS_AutoEnroll` — which this firmware uses, and
+whose duplicate-refusal flag fixed a real bug — is simply gone.
 
-Three things stand between that and a real defence, all unresolved:
+### The handshake, and why ECB does not sink it
 
-- **Whether the ZW111 supports it at all.** The manual is written for Hi-Link's
-  whole range and says only that "some fingerprint module products based on
-  security chips" have it. Read register 7 and try `PS_GetKeyt`: `0x31` means
-  the function does not match the encryption level.
-- **The level is one-way.** "Changes are not allowed after setting." Set it wrong
-  on a unit and that unit is what it is.
-- **ECB.** Every symmetric level is ECB, which is deterministic and unauthenticated.
-  Whether that is a channel worth trusting depends on how the challenge-response
-  is constructed on top of it, and a random-nonce protocol can be sound over a
-  bad mode — but it is not a detail to wave through.
+`PS_GetKeyt` (`0xE0`) makes the module generate key material and send it to the
+MCU, which keeps it. **`PS_LockKeyt` (`0xE1`) then refuses to ever issue another
+pair**, and that is what makes the scheme worth anything: provision at assembly,
+lock, and an attacker who later opens the case cannot ask the module for a fresh
+key. At levels 2–4 the material is 32 bytes, read as two 16-byte keys A and B.
 
-Until then the honest claim is unchanged: **resists a compromised host, resists
-offline key extraction, does not resist physical possession.**
+A verification then runs:
+
+1. the MCU generates a fresh 16-byte random `R` and sends `E_A(R)`;
+2. the module decrypts it, searches, and builds one 16-byte block
+   `P = T(1) ‖ I(2) ‖ S(2) ‖ R[0..10]` — result, template id, score, and eleven
+   bytes of the MCU's own nonce;
+3. the module returns `E_B(P)`, and the MCU decrypts and checks those eleven
+   bytes against the `R` it just chose.
+
+ECB is the wrong default almost everywhere, and here it does not matter: `P` is
+exactly one block, so there is no block structure to leak, and the response
+carries 88 bits of a nonce the attacker cannot predict. Forging a match needs
+key B; replaying an old success needs the MCU to reuse `R`, which it does not.
+Someone who cuts the harness can still stop the device working, but can no
+longer make it sign.
+
+What it does not fix is the provisioning moment. `PS_GetKeyt` sends the keys over
+the same plain UART, so the assembly bench is inside the trust boundary — the
+manual says as much — and the keys then live in the MCU's encrypted storage,
+where the firmware can read them. That is the standing gap, not a new one.
+
+### What is unresolved
+
+- **Whether the ZW111 supports any of it.** The manual covers Hi-Link's whole
+  range and says only that "some fingerprint module products based on security
+  chips" have the set. Both modules here report `SecurLevel 0`.
+  `FINGERPRINT_SECPROBE` settles it without writing anything: it sends
+  `PS_GetCiphertext` and reports the raw confirmation code. `0x31` (wrong level)
+  or `0x2e` (no key) mean the opcode is implemented; `0x01` means it is not.
+  `0xE2` is the safe member to send — `0xE0` clears templates and `0xE1` is
+  irreversible.
+- **The level is one-way.** "Changes are not allowed after setting." A module set
+  to a level whose protocol we cannot implement is finished.
+- **Which level.** 3 (AES-128) is the one to want: mbedTLS already has AES, SM4
+  is not in it at all, 3DES at level 4 is weak, and levels 20 and 21 return
+  128-byte responses on a protocol the manual describes inconsistently.
+
+Until that probe answers, the honest claim is unchanged: **resists a compromised
+host, resists offline key extraction, does not resist physical possession.**
 
 What raises cost without pretending to be authentication:
 

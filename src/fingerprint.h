@@ -150,6 +150,14 @@ bool fingerprint_read_info(fp_info_t *out);
 // actually live. Returns bytes stored.
 uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
 
+// Asks whether this module implements the safety instruction set at all, by
+// issuing one member of it and returning the raw confirmation code.
+//
+// 0x31 (wrong encryption level) or 0x2e (no key yet) mean the module knows the
+// opcode, so an authenticated link is reachable on this part. 0x01 means it does
+// not. 0xff means no module answered.
+uint8_t fingerprint_security_probe(void);
+
 // PS_GetChipSN: the die's unique 32-byte serial. This is what a device should
 // bind to if it is to notice its sensor being swapped — unlike the info page's
 // Product SN, which the manual defines as a model identifier.
