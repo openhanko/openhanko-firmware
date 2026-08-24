@@ -161,7 +161,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     int status_len = snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s name=\"%s\"",
+             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
              // What actually authorises a signature on this build. The button
              // only does when compiled in for a bench board with no sensor.
@@ -183,6 +183,11 @@ static void handle_command(void) {
              fingerprint_status_text(),
              !fingerprint_touch_wired() ? "unwired"
                                         : (fingerprint_touch_asserted() ? "down" : "up"),
+             (unsigned)fingerprint_boot_rx_bytes(),
+             fingerprint_boot_saw_hello() ? "hello" : "nohello",
+             (unsigned)fingerprint_line_high(false), (unsigned)fingerprint_line_edges(false),
+             (unsigned)fingerprint_line_high(true), (unsigned)fingerprint_line_edges(true),
+             (unsigned)fingerprint_line_min_pulse_us(),
              identity_common_name());
     if (status_len >= (int)sizeof(line)) {
       // Say so rather than sending a line that looks complete and is not.
@@ -278,12 +283,28 @@ static void handle_command(void) {
     fp_info_t info;
     if (fingerprint_read_info(&info)) {
       snprintf(line, sizeof(line),
-               "OK FINGERPRINT_INFO model=\"%s\" sw=\"%s\" mfr=\"%s\" sensor=\"%s\"",
-               info.product_model, info.sw_version, info.manufacturer, info.sensor_name);
+               "OK FINGERPRINT_INFO model=\"%s\" sw=\"%s\" mfr=\"%s\" sensor=\"%s\" "
+               "addr=%08lx capacity=%u baud=%lu seclevel=%u pwd=%08lx table=%04x",
+               info.product_model, info.sw_version, info.manufacturer, info.sensor_name,
+               (unsigned long)info.device_address, info.capacity,
+               (unsigned long)info.baud, info.security_level,
+               (unsigned long)info.password, info.table_flag);
       send_line(line);
     } else {
       send_line("ERR FINGERPRINT_INFO");
     }
+
+  } else if (strcmp(command, "FINGERPRINT_PROBE") == 0) {
+    bool ok = fingerprint_probe();
+    snprintf(line, sizeof(line),
+             "%s FINGERPRINT_PROBE fp=%s baud=%u rx_bytes=%u hello=%s touch=%s",
+             ok ? "OK" : "ERR", fingerprint_status_text(),
+             (unsigned)fingerprint_probe_baud(),
+             (unsigned)fingerprint_probe_rx_bytes(),
+             fingerprint_probe_saw_hello() ? "yes" : "no",
+             !fingerprint_touch_wired() ? "unwired"
+                                        : (fingerprint_touch_asserted() ? "down" : "up"));
+    send_line(line);
 
   } else if (strcmp(command, "FINGERPRINT_SN") == 0) {
     // The per-unit identity, and the one to bind against. Two modules from one

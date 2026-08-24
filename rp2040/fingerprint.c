@@ -38,6 +38,7 @@
 #define INS_SEARCH          0x04
 // PS_GetChipSN: 32 bytes, unique per die.
 #define INS_CHIP_SERIAL     0x34
+#define INS_HANDSHAKE       0x35
 #define INS_TEMPLATE_COUNT  0x1d
 #define INS_AURA_LED        0x3c
 #define INS_READ_INFO_PAGE  0x16
@@ -51,6 +52,89 @@
 #define FP_UART (FINGERPRINT_UART_INSTANCE)
 
 static bool module_present;
+
+static uint16_t probe_rx_bytes;
+static bool probe_saw_hello;
+// The boot probe's result, kept separately so a later manual probe cannot
+// overwrite it. It is the more meaningful of the two: the module speaks
+// unprompted exactly once, with 0x55 at power-up, so bytes seen then prove its
+// TX reaches this pin. A re-probe minutes later cannot prove that — silence
+// there is equally consistent with our TX never reaching the module at all.
+static uint16_t boot_rx_bytes;
+static bool boot_saw_hello;
+static bool boot_probe_done;
+
+// What the pins looked like before the UART claimed them.
+static uint16_t line_high_tx, line_high_rx, line_edges_tx, line_edges_rx;
+// Narrowest pulse seen on the RX line, in microseconds. One bit time, so the
+// baud rate is its reciprocal — which measures what the module is actually
+// doing instead of guessing from a list.
+static uint32_t line_min_pulse_us;
+
+// Samples the two UART pins as plain inputs, before uart_init takes them.
+//
+// This answers a question a UART cannot: the pin functions are fixed in silicon
+// — UART1 TX exists only on GP4/8/20/24 and RX only on GP5/9/21/25 — so the
+// lines cannot be swapped in firmware to test a suspected miswire. But an idle
+// UART transmitter holds its line high, so with a pull-down fitted, whichever
+// pin reads high has something driving it. A module wired correctly shows GP5
+// high and GP4 low; the reverse means TX and RX are crossed; both low means
+// nothing is driving either, which is a power or ground fault rather than a
+// wiring one.
+static void scan_uart_lines(void) {
+  gpio_init(FINGERPRINT_UART_TX);
+  gpio_set_dir(FINGERPRINT_UART_TX, GPIO_IN);
+  gpio_pull_down(FINGERPRINT_UART_TX);
+  gpio_init(FINGERPRINT_UART_RX);
+  gpio_set_dir(FINGERPRINT_UART_RX, GPIO_IN);
+  gpio_pull_down(FINGERPRINT_UART_RX);
+  sleep_ms(2);  // let the pulls settle before believing a level
+
+  bool last_tx = gpio_get(FINGERPRINT_UART_TX);
+  bool last_rx = gpio_get(FINGERPRINT_UART_RX);
+  // 600 ms covers the module's power-up and its unprompted 0x55, whose
+  // alternating bits produce edges that a static level check would miss.
+  for (int i = 0; i < 6000; i++) {
+    bool tx = gpio_get(FINGERPRINT_UART_TX);
+    bool rx = gpio_get(FINGERPRINT_UART_RX);
+    if (tx) line_high_tx++;
+    if (rx) line_high_rx++;
+    if (tx != last_tx) { line_edges_tx++; last_tx = tx; }
+    if (rx != last_rx) { line_edges_rx++; last_rx = rx; }
+    sleep_us(100);
+  }
+  // Then time the line. The coarse pass above samples at 100 us, which cannot
+  // resolve a 17 us bit at 57600, so this polls as fast as the core allows and
+  // keeps the shortest gap between edges.
+  line_min_pulse_us = UINT32_MAX;
+  uint32_t start = time_us_32();
+  bool last = gpio_get(FINGERPRINT_UART_RX);
+  uint32_t last_edge = start;
+  while (time_us_32() - start < 700000u) {
+    bool now = gpio_get(FINGERPRINT_UART_RX);
+    if (now != last) {
+      uint32_t t = time_us_32();
+      uint32_t d = t - last_edge;
+      if (d > 0 && d < line_min_pulse_us) line_min_pulse_us = d;
+      last_edge = t;
+      last = now;
+    }
+  }
+  if (line_min_pulse_us == UINT32_MAX) line_min_pulse_us = 0;
+
+  printf("fingerprint: line scan gp%d high=%u edges=%u, gp%d high=%u edges=%u min=%uus\n",
+         FINGERPRINT_UART_TX, line_high_tx, line_edges_tx,
+         FINGERPRINT_UART_RX, line_high_rx, line_edges_rx,
+         (unsigned)line_min_pulse_us);
+}
+
+uint16_t fingerprint_line_high(bool rx_pin) {
+  return rx_pin ? line_high_rx : line_high_tx;
+}
+uint16_t fingerprint_line_edges(bool rx_pin) {
+  return rx_pin ? line_edges_rx : line_edges_tx;
+}
+uint32_t fingerprint_line_min_pulse_us(void) { return line_min_pulse_us; }
 
 // Reads the module's TouchOut line, or falls back to asking the module when the
 // line is not wired.
@@ -243,6 +327,9 @@ static uint8_t exchange(uint8_t ins, const uint8_t *params, uint8_t param_len,
 // MARK: - Public interface
 
 void fingerprint_init(void) {
+  // Before the UART claims the pins, look at what is driving them.
+  scan_uart_lines();
+
   uart_init(FP_UART, FINGERPRINT_BAUD);
   gpio_set_function(FINGERPRINT_UART_TX, GPIO_FUNC_UART);
   gpio_set_function(FINGERPRINT_UART_RX, GPIO_FUNC_UART);
@@ -259,19 +346,14 @@ void fingerprint_init(void) {
   else gpio_pull_up(FINGERPRINT_TOUCH_GPIO);
 #endif
 
-  // The module takes a moment after power-up before it will answer.
-  sleep_ms(200);
-
-  // Handshake with the default all-zero password. Two attempts: the first
-  // often lands while the module is still starting.
-  uint8_t password[4] = {0, 0, 0, 0};
-  for (int attempt = 0; attempt < 2 && !module_present; attempt++) {
-    module_present = exchange(INS_VERIFY_PASSWORD, password, sizeof(password),
-                              NULL, 0, NULL, 500) == CC_OK;
+  bool ok = fingerprint_probe();
+  if (!boot_probe_done) {
+    boot_probe_done = true;
+    boot_rx_bytes = probe_rx_bytes;
+    boot_saw_hello = probe_saw_hello;
   }
-
-  if (!module_present) {
-    printf("fingerprint: no module on uart (button remains the trigger)\n");
+  if (!ok) {
+    printf("fingerprint: no module on uart\n");
     return;
   }
 
@@ -292,6 +374,86 @@ bool fingerprint_present(void) {
 uint16_t fingerprint_template_count(void) {
   return template_count;
 }
+
+// What the last probe saw on the wire, for the console to report. Without this
+// the only evidence is a printf on UART0, which a board may not break out.
+
+uint16_t fingerprint_probe_rx_bytes(void) { return probe_rx_bytes; }
+bool fingerprint_probe_saw_hello(void) { return probe_saw_hello; }
+
+// The baud the module actually answered on, 0 if none did.
+static uint32_t probe_baud;
+uint32_t fingerprint_probe_baud(void) { return probe_baud; }
+
+// Tries one baud rate. Both a password verify and a plain handshake, because a
+// module whose password has been changed answers VfyPwd with an error rather
+// than silence — but only if it can hear us at all, which is the thing being
+// tested here.
+static bool probe_at_baud(uint32_t baud) {
+  uart_set_baudrate(FP_UART, baud);
+  sleep_ms(20);
+  uint8_t password[4] = {0, 0, 0, 0};
+  if (exchange(INS_VERIFY_PASSWORD, password, sizeof(password), NULL, 0, NULL, 400)
+      != 0xff) {
+    return true;  // anything but a timeout means it heard us
+  }
+  return exchange(INS_HANDSHAKE, NULL, 0, NULL, 0, NULL, 400) != 0xff;
+}
+
+bool fingerprint_probe(void) {
+  module_present = false;
+  probe_baud = 0;
+  template_count = 0;
+  probe_rx_bytes = 0;
+  probe_saw_hello = false;
+
+  // The manual says the module emits 0x55 on the UART once it has finished
+  // initialising, and that a host which does not wait for it should allow
+  // 200 ms. Do both: watch for the byte, and fall through on the timeout rather
+  // than depend on catching it, since a re-probe long after power-up never will.
+  //
+  // Counting everything that arrives, not just the 0x55, because the count is
+  // the more useful signal during bring-up: nothing at all means the module's TX
+  // is not reaching this pin, while bytes that are not 0x55 mean the wire is
+  // right and something else — baud, most likely — is not.
+  uint32_t deadline = now_ms() + 400;
+  uint8_t byte = 0;
+  while (now_ms() < deadline) {
+    if (!read_byte(&byte, deadline)) break;
+    probe_rx_bytes++;
+    if (byte == 0x55) { probe_saw_hello = true; break; }
+  }
+
+  // Sweep the plausible baud rates rather than trusting the configured one. The
+  // module's rate is a stored register — a unit that has been configured before,
+  // or that shipped with a different default, answers on one of these and on no
+  // other, and the symptom either way is silence.
+  static const uint32_t bauds[] = {57600, 9600, 19200, 38400, 115200};
+  for (size_t i = 0; i < sizeof(bauds) / sizeof(bauds[0]); i++) {
+    if (probe_at_baud(bauds[i])) { probe_baud = bauds[i]; break; }
+  }
+  uart_set_baudrate(FP_UART, probe_baud ? probe_baud : (uint32_t)FINGERPRINT_BAUD);
+  if (!probe_baud) return false;
+
+  uint8_t password[4] = {0, 0, 0, 0};
+  for (int attempt = 0; attempt < 3 && !module_present; attempt++) {
+    module_present = exchange(INS_VERIFY_PASSWORD, password, sizeof(password),
+                              NULL, 0, NULL, 500) == CC_OK;
+  }
+  if (!module_present) return false;
+
+  uint8_t payload[8];
+  uint8_t payload_len = 0;
+  if (exchange(INS_TEMPLATE_COUNT, NULL, 0, payload, sizeof(payload), &payload_len,
+               500) == CC_OK && payload_len >= 2) {
+    template_count = ((uint16_t)payload[0] << 8) | payload[1];
+  }
+  printf("fingerprint: module ready, %u template(s) enrolled\n", template_count);
+  return true;
+}
+
+uint16_t fingerprint_boot_rx_bytes(void) { return boot_rx_bytes; }
+bool fingerprint_boot_saw_hello(void) { return boot_saw_hello; }
 
 bool fingerprint_finger_down(void) {
   if (!module_present) return false;
@@ -448,6 +610,14 @@ bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]) {
   memcpy(out, payload, FP_CHIP_SERIAL_LEN);
   return true;
 }
+static uint16_t rd16(const uint8_t *p, uint16_t off) {
+  return (uint16_t)((p[off] << 8) | p[off + 1]);
+}
+static uint32_t rd32(const uint8_t *p, uint16_t off) {
+  return ((uint32_t)p[off] << 24) | ((uint32_t)p[off + 1] << 16) |
+         ((uint32_t)p[off + 2] << 8) | p[off + 3];
+}
+
 bool fingerprint_read_info(fp_info_t *out) {
   if (!out) return false;
   memset(out, 0, sizeof(*out));
@@ -459,39 +629,33 @@ bool fingerprint_read_info(fp_info_t *out) {
     return false;
   }
 
-  // The page layout is not documented anywhere we could find — Hi-Link's
-  // datasheet defers the command set to a protocol note that does not appear to
-  // be published at all. So this scans for the first run of four consecutive
-  // 8-byte printable-ASCII fields, which is what the one open-source driver for
-  // these parts does; evidently its author had no layout either.
+  // Fixed offsets, from the manual's parameter table and confirmed against a
+  // real module. This used to scan for a run of printable ASCII, which landed
+  // four bytes late: the fields begin at 28, but byte 25 holds a 0x01 that broke
+  // the run, so the scan settled on 32 and sliced every string mid-word.
   //
-  // The offset is therefore discovered, not known. First contact with a real
-  // module should dump the whole page and confirm this lands on the intended
-  // four fields rather than on some other ASCII run that happens to come first.
-  uint16_t limit = (uint16_t)((len > 128 ? 128 : len) - 32);
-  for (uint16_t off = 0; off <= limit; off += 8) {
-    bool run_ok = true;
-    for (uint16_t f = 0; f < 32 && run_ok; f++) {
-      uint8_t c = page[off + f];
-      if (c != 0x00 && (c < 0x20 || c > 0x7e)) run_ok = false;
-    }
-    if (!run_ok) continue;
+  // The layout is corroborated at several independent points — the device
+  // address reads 0xFFFFFFFF at 8, the baud coefficient at 14 gives exactly the
+  // rate the module answers on, and the table flag at 126 is the 0x1234 the
+  // manual says marks an initialised table.
+  out->device_address  = rd32(page, 8);
+  out->capacity        = rd16(page, 4);
+  out->baud            = (uint32_t)rd16(page, 14) * 9600u;
+  out->security_level  = rd16(page, 20);
+  out->password        = rd32(page, 60);
+  out->table_flag      = rd16(page, 126);
 
-    char *fields[4] = {out->product_model, out->sw_version,
-                       out->manufacturer, out->sensor_name};
-    for (int f = 0; f < 4; f++) {
-      memcpy(fields[f], page + off + (f * 8), 8);
-      fields[f][8] = '\0';
-      for (int n = 8; n > 0; n--) {
-        if (fields[f][n - 1] == '\0' || fields[f][n - 1] == ' ') fields[f][n - 1] = '\0';
-        else break;
-      }
+  char *fields[4] = {out->product_model, out->sw_version,
+                     out->manufacturer, out->sensor_name};
+  for (int f = 0; f < 4; f++) {
+    memcpy(fields[f], page + 28 + (f * 8), 8);
+    fields[f][8] = '\0';
+    for (int n = 8; n > 0; n--) {
+      if (fields[f][n - 1] == '\0' || fields[f][n - 1] == ' ') fields[f][n - 1] = '\0';
+      else break;
     }
-    return true;
   }
-
-  printf("fingerprint: info page held no recognisable field run\n");
-  return false;
+  return true;
 }
 
 bool fingerprint_random(uint32_t *out) {
@@ -524,5 +688,14 @@ uint16_t fingerprint_read_info_page(uint8_t *o, uint16_t c) { (void)o; (void)c; 
 const char *fingerprint_status_text(void) { return "absent"; }
 bool fingerprint_touch_wired(void) { return false; }
 bool fingerprint_touch_asserted(void) { return false; }
+bool fingerprint_probe(void) { return false; }
+uint32_t fingerprint_probe_baud(void) { return 0; }
+uint16_t fingerprint_probe_rx_bytes(void) { return 0; }
+uint16_t fingerprint_boot_rx_bytes(void) { return 0; }
+bool fingerprint_boot_saw_hello(void) { return false; }
+uint16_t fingerprint_line_high(bool rx_pin) { (void)rx_pin; return 0; }
+uint16_t fingerprint_line_edges(bool rx_pin) { (void)rx_pin; return 0; }
+uint32_t fingerprint_line_min_pulse_us(void) { return 0; }
+bool fingerprint_probe_saw_hello(void) { return false; }
 
 #endif

@@ -25,6 +25,9 @@ int piv_key_parse_error(void);
 // used once. Called after a debounced button press.
 void piv_note_user_presence(void);
 
+// Labels the next trace entry: "FINGER", "BUTTON". Purely diagnostic.
+void piv_set_presence_source(const char *source);
+
 // Marks the PIN as verified without an APDU. Used by the pinpad path, where
 // the host delegates PIN entry to the reader and no VERIFY ever arrives.
 void piv_note_pin_verified(void);

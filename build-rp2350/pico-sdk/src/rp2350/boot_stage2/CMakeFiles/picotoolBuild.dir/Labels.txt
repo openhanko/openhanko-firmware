@@ -1,0 +1,14 @@
+# Target labels
+ picotoolBuild
+# Source files and their labels
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/CMakeFiles/picotoolBuild
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/CMakeFiles/picotoolBuild.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/CMakeFiles/picotoolBuild-complete.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-build.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-configure.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-download.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-install.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-mkdir.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-patch.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-test.rule
+/Users/vden/work/openhanko-firmware/build-rp2350/pico-sdk/src/rp2350/boot_stage2/picotool/src/picotoolBuild-stamp/picotoolBuild-update.rule

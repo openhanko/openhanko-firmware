@@ -494,12 +494,18 @@ void piv_note_pin_verified(void) {
   pin_verified_until = now_ms() + PIN_VERIFIED_WINDOW_MS;
 }
 
+// What proved presence, for the trace. On a production unit this is always the
+// fingerprint; the label said BUTTON regardless, which is actively misleading in
+// exactly the traces used to debug the sensor.
+static const char *piv_presence_source = "PRESENCE";
+void piv_set_presence_source(const char *source) { piv_presence_source = source; }
+
 void piv_note_user_presence(void) {
   user_presence_until = now_ms() + USER_PRESENCE_WINDOW_MS;
   session_presence_until = now_ms() + SESSION_PRESENCE_WINDOW_MS;
   // The press answered whatever macOS was asking, so stop asking for it.
   challenge_until = 0;
-  trace_event("BUTTON");
+  trace_event(piv_presence_source);
   LOG("user presence accepted");
 }
 

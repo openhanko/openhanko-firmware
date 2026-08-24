@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/vden/work/openhanko-firmware/build-rp2350/_deps/picotool-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

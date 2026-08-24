@@ -47,6 +47,33 @@ void fingerprint_init(void);
 // True when a module answered the handshake at startup.
 bool fingerprint_present(void);
 
+// Re-runs the power-up and password handshakes and re-reads the template count.
+// For bring-up: rewire, probe, get an answer, with no reflash in between.
+bool fingerprint_probe(void);
+
+// Which baud rate the module answered on during the last probe, 0 if none.
+uint32_t fingerprint_probe_baud(void);
+
+// Evidence from the last probe: how many bytes arrived on the module's TX line
+// at all, and whether the 0x55 power-up handshake was among them.
+uint16_t fingerprint_probe_rx_bytes(void);
+bool fingerprint_probe_saw_hello(void);
+
+// The same, from the probe run at boot — which is the one that can catch the
+// module's unprompted 0x55 and so prove its TX reaches us.
+uint16_t fingerprint_boot_rx_bytes(void);
+bool fingerprint_boot_saw_hello(void);
+
+// How the two UART pins looked as plain inputs at boot, before the UART took
+// them: samples seen high out of 6000, and how many times the level changed.
+// Pass true for the RX pin, false for TX.
+uint16_t fingerprint_line_high(bool rx_pin);
+uint16_t fingerprint_line_edges(bool rx_pin);
+
+// Narrowest pulse measured on the RX line at boot, in microseconds: one bit
+// time, so 1e6 divided by it is the baud the module is really using.
+uint32_t fingerprint_line_min_pulse_us(void);
+
 // How many templates are enrolled, or 0 if unknown.
 uint16_t fingerprint_template_count(void);
 
@@ -93,6 +120,12 @@ typedef struct {
   char sw_version[9];
   char manufacturer[9];
   char sensor_name[9];
+  uint32_t device_address;   // 0xFFFFFFFF from the factory
+  uint16_t capacity;         // templates the module can hold
+  uint32_t baud;             // already multiplied out
+  uint16_t security_level;   // 0 = safety instruction set unavailable
+  uint32_t password;         // readable, which is why it is not a secret
+  uint16_t table_flag;       // 0x1234 once the parameter table is initialised
 } fp_info_t;
 
 // PS_ReadINFpage (0x16): reads the module's 512-byte info page.

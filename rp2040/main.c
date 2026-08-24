@@ -84,6 +84,7 @@ static void random_pin(char *out, size_t digits) {
 // did before — meant a fingerprint match authorised signing but never completed
 // the pinpad exchange, leaving macOS waiting on a card that had already agreed.
 static void note_presence(const char *source) {
+  piv_set_presence_source(source);
   last_press_ms = now_ms();
   confirm_until_ms = now_ms() + CONFIRM_MS;
   printf("main: presence from %s; authorizing PIV and typing the dummy PIN\n", source);
@@ -372,7 +373,7 @@ static void poll_fingerprint(void) {
 
   printf("main: fingerprint matched slot %u (score %u)\n", slot, score);
   config_console_send_line("EVENT FINGERPRINT");
-  note_presence("fingerprint");
+  note_presence("FINGER");
 }
 
 // Gives up on pinpad mode when nothing claims the card.
@@ -525,7 +526,7 @@ int main(void) {
 #if BUTTON_AUTHENTICATES
       // Bench boards with no sensor fitted. Never compiled into a unit that has
       // one — see BUTTON_AUTHENTICATES in board_config.h.
-      if (!fingerprint_present()) note_presence("button");
+      if (!fingerprint_present()) note_presence("BUTTON");
 #endif
     }
   }
