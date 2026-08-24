@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/vden/work/openhanko-firmware/build-rp2350/pioasm/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

@@ -9,8 +9,13 @@ keys/
 */main/secrets.h
 */secrets.h
 
-# build output
+# build output. Matches any tree, not just */build/ — build-rp2350/ and
+# build-bench/ slipped past the narrower pattern and landed 1400 files in a
+# commit.
+build/
+build-*/
 */build/
+*/build-*/
 */managed_components/
 */sdkconfig
 */sdkconfig.old
