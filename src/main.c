@@ -64,7 +64,8 @@ static status_led_mode_t led_mode(void) {
 // achieves nothing, because the signature that follows still waits on a finger.
 //
 // One draw covers six digits; get_rand_64() is ring-oscillator jitter on an
-// RP2040, which is not good enough for a key and far better than needed here.
+// ring-oscillator jitter, which is far better than needed for a value that is
+// not a secret.
 static void random_pin(char *out, size_t digits) {
   uint64_t r = get_rand_64();
   for (size_t i = 0; i < digits; i++) {
@@ -74,9 +75,9 @@ static void random_pin(char *out, size_t digits) {
   out[digits] = '\0';
 }
 
-// The single funnel for "the user proved they are here". On a production unit
-// the only caller is a fingerprint match; BUTTON_AUTHENTICATES adds the button
-// back for bench boards with no sensor.
+// The single funnel for "the user proved they are here". Its only caller is a
+// fingerprint match — the button cannot reach it, and there is no build in which
+// it can.
 //
 // last_press_ms is set here rather than at each call site because the pinpad
 // branch reads it to decide whether presence was proved recently enough to
@@ -244,7 +245,7 @@ static void mirror_light(status_led_mode_t mode) {
 
 // ---------------------------------------------------------------- enrollment
 //
-// The button never authenticates (see BUTTON_AUTHENTICATES), so it is free to
+// The button never authenticates, so it is free to
 // mean something else, and what it means is "I want to add a finger". The click
 // alone only marks intent: what authorises the operation is the finger resting
 // on the sensor at the moment of the click, which must already be enrolled.
@@ -513,7 +514,7 @@ static void upgrade_if_driver_present(void) {
 
 int main(void) {
   stdio_init_all();
-  printf("\nsmart-card (rp2040) starting\n");
+  printf("\nopenhanko starting\n");
 
   button_init();
   settings_init();
@@ -581,9 +582,6 @@ int main(void) {
       // one press is enough.
       bool recent = last_press_ms != 0 &&
                     (now_ms() - last_press_ms) < PRESS_ANSWERS_PINPAD_MS;
-#if BUTTON_AUTHENTICATES
-      if (button_pressed()) recent = true;
-#endif
       if (recent) {
         printf("main: answering pinpad PIN entry%s\n", recent ? " (recent press)" : "");
         config_console_send_line("EVENT PINPAD_OK");
@@ -604,11 +602,6 @@ int main(void) {
       // enrollment. What authorises the enrollment is the finger on the sensor,
       // not the click.
       enroll_gate();
-#if BUTTON_AUTHENTICATES
-      // Bench boards with no sensor fitted. Never compiled into a unit that has
-      // one — see BUTTON_AUTHENTICATES in board_config.h.
-      if (!fingerprint_present()) note_presence("BUTTON");
-#endif
     }
   }
 }

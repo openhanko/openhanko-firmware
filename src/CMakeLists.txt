@@ -7,7 +7,7 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 set(PICO_MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/mbedtls_config.h")
 
 include(pico_sdk_import.cmake)
-project(smart_card_rp2040 C CXX ASM)
+project(openhanko C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 pico_sdk_init()
 
@@ -21,7 +21,7 @@ if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/secrets.h")
                  "${CMAKE_CURRENT_LIST_DIR}/secrets.h" COPYONLY)
 endif()
 
-add_executable(smart_card_rp2040
+add_executable(openhanko
   main.c
   button.c
   config_console.c
@@ -37,12 +37,12 @@ add_executable(smart_card_rp2040
   usb_hid.c
 )
 
-target_include_directories(smart_card_rp2040 PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(openhanko PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 # Assembles ws2812.pio into ws2812.pio.h.
-pico_generate_pio_header(smart_card_rp2040 ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
+pico_generate_pio_header(openhanko ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
-target_link_libraries(smart_card_rp2040
+target_link_libraries(openhanko
   pico_stdlib
   pico_unique_id
   pico_rand
@@ -69,48 +69,11 @@ target_link_libraries(smart_card_rp2040
 # Double-tap RESET within this window to land in the bootloader. The library
 # No activity LED configured: that option drives a plain GPIO, which would
 # corrupt the WS2812 data line rather than light it.
-target_compile_definitions(smart_card_rp2040 PRIVATE
+target_compile_definitions(openhanko PRIVATE
   PICO_BOOTSEL_VIA_DOUBLE_RESET_TIMEOUT_MS=800
 )
 
-# Bench boards with no fingerprint sensor fitted, where the button has to stand
-# in as the presence check:
-#
-#     cmake -S rp2040 -B build -DBUTTON_AUTHENTICATES=ON
-#
-# Off by default, so a unit built without thinking about it is one whose button
-# cannot authenticate at all. Never turn it on for a unit that has a sensor: it
-# restores exactly the bare-press path the sensor exists to replace.
-option(BUTTON_AUTHENTICATES
-       "Let the button authorise signatures — bench boards with no sensor" OFF)
-if(BUTTON_AUTHENTICATES)
-  message(WARNING
-    "BUTTON_AUTHENTICATES=ON: a button press will authorise signing. "
-    "Bench builds only — never ship this.")
-  target_compile_definitions(smart_card_rp2040 PRIVATE BUTTON_AUTHENTICATES=1)
-endif()
+pico_enable_stdio_uart(openhanko 1)
+pico_enable_stdio_usb(openhanko 0)
 
-# The RP2040-Zero development board, which differs from the production board in
-# all the ways that matter to the pinout:
-#
-#     cmake -S rp2040 -B build-bench -DBENCH_BOARD=ON
-#
-# Its button is on GP10 rather than GP12, it has a WS2812 on GP16 where the
-# production board has no discrete LED at all, and with no fingerprint module
-# fitted the button has to stand in as the presence check.
-option(BENCH_BOARD "RP2040-Zero bench board: GP10 button, WS2812 on GP16" OFF)
-if(BENCH_BOARD)
-  message(WARNING
-    "BENCH_BOARD=ON: bench pinout, and the button authorises signing. "
-    "Never ship this.")
-  target_compile_definitions(smart_card_rp2040 PRIVATE
-    BUTTON_AUTHENTICATES=1
-    BUTTON_GPIO=10
-    STATUS_LED_GPIO=16
-  )
-endif()
-
-pico_enable_stdio_uart(smart_card_rp2040 1)
-pico_enable_stdio_usb(smart_card_rp2040 0)
-
-pico_add_extra_outputs(smart_card_rp2040)
+pico_add_extra_outputs(openhanko)

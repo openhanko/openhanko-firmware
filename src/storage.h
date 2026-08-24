@@ -9,7 +9,7 @@
 // levelling and no journal: this is written once during provisioning and read
 // at every boot, so a log-structured store would be complexity for nothing.
 //
-// The keys are stored in plaintext. On the RP2040 there is no flash encryption
+// The keys are stored in plaintext. There is no flash encryption
 // to lose — see README.md on why that is a smaller downgrade than it sounds
 // for a presence-gated device.
 

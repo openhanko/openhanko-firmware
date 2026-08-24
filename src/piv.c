@@ -319,12 +319,11 @@ static bool tlv_find_one(const uint8_t *buf, size_t buf_len, uint8_t tag,
   return false;
 }
 
-// The RP2040 has no hardware TRNG. pico_rand mixes the ring oscillator's random
-// bit, the board id and timer jitter, which is weaker than a real entropy
-// source. Tolerable only because it is not in the nonce path: signing is RFC
-// 6979 deterministic (MBEDTLS_ECDSA_DETERMINISTIC), which derives the nonce from
-// the key and message instead. A predictable nonce would recover the private key
-// from one signature, so do not turn that off.
+// Not in the nonce path, and must not become so. Signing is RFC 6979
+// deterministic (MBEDTLS_ECDSA_DETERMINISTIC), which derives the nonce from the
+// key and the message rather than from here — a predictable nonce recovers the
+// private key from a single signature, so do not turn that off. This feeds
+// blinding and padding, where the RP2350's TRNG is more than sufficient.
 static int piv_rng(void *ctx, unsigned char *out, size_t len) {
   (void)ctx;
   while (len >= sizeof(uint64_t)) {

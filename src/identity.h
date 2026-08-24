@@ -14,11 +14,10 @@
 // key never exists outside this chip, so there is nothing to store, back up,
 // leak, or be asked about.
 //
-// The catch is the RNG, and it is a real one. This depends entirely on
-// get_rand_64(), which on the RP2040 is seeded from ring-oscillator jitter and
-// is not a trustworthy source for long-lived key material. Keys generated on an
-// RP2040 are for development. On the RP2350 the same call is backed by the
-// hardware TRNG, and only there is this genuinely sound.
+// This rests on get_rand_64(), which on the RP2350 is backed by the hardware
+// TRNG. That is the whole reason this part is the target: a key is only worth as
+// much as the randomness it came from, and generating one on a part without a
+// true entropy source produces something that looks like a key and is not.
 
 // True if the device already holds an identity, generated or provisioned.
 bool identity_present(void);

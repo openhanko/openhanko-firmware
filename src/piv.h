@@ -50,7 +50,7 @@ void piv_set_pairing_mode(bool enabled);
 bool piv_pairing_mode_active(void);
 
 // Times one RSA private-key operation, in milliseconds; 0 if no key is loaded.
-// The RP2040 has no big-integer accelerator, so this is the number that decides
+// There is no big-integer accelerator, so this is the number that decides
 // whether the part is fast enough to be pleasant.
 uint32_t piv_benchmark_sign(void);
 

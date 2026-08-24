@@ -31,7 +31,7 @@ import tty
 OPENSSL = "/usr/bin/openssl"
 CHUNK = 480
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
-SECRETS_PATH = os.path.join(REPO_ROOT, "rp2040", "secrets.h")
+SECRETS_PATH = os.path.join(REPO_ROOT, "src", "secrets.h")
 SLOTS = (
     ("cert9a", "cert_9a", "authentication certificate"),
     ("key9a", "key_9a", "authentication private key"),
@@ -277,7 +277,7 @@ def command_gen_secrets(args: argparse.Namespace) -> None:
     say(f"  wrote {destination}")
     say("")
     say("Now build and flash:")
-    say("  cd rp2040 && cmake -S . -B build && cmake --build build")
+    say("  cd src && cmake -S . -B build && cmake --build build")
     say("")
     say("Then pair it:  ./provision.py pair")
 
@@ -440,9 +440,9 @@ def main() -> int:
                           parents=[port_option]).set_defaults(handler=command_monitor)
 
     secrets = subparsers.add_parser(
-        "gen-secrets", help="generate keys and write rp2040/secrets.h")
+        "gen-secrets", help="generate keys and write src/secrets.h")
     secrets.add_argument("--name", help="common name to put in the certificates")
-    secrets.add_argument("--output", metavar="PATH", help="write somewhere other than rp2040/secrets.h")
+    secrets.add_argument("--output", metavar="PATH", help="write somewhere other than src/secrets.h")
     secrets.add_argument("--force", action="store_true", help="overwrite an existing secrets.h")
     secrets.add_argument("--algorithm", choices=("ec", "rsa"), default="ec",
                          help="ec = P-256 (default, fast everywhere); "

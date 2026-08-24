@@ -15,26 +15,12 @@
 //   momentary switch to GND   -> ACTIVE_LEVEL 0, PULL_UP 1
 //   TTP223-style touch module -> ACTIVE_LEVEL 1, PULL_UP 0
 //
-// GPIO10 with the internal pull-up: wire the switch between GP10 and any GND
-// pin. No external resistor needed.
-// Whether a button press may authorise a signature.
+// GP12 with the internal pull-up: wire the switch between GP12 and any GND pin.
+// No external resistor needed.
 //
-// 0 on any unit with a sensor fitted: the fingerprint is the only thing that
-// authenticates, and such a build contains no path whatsoever from the button
-// to piv_note_user_presence().
-//
-// Compile-time rather than a runtime "use the button when no module answers",
-// because that runtime rule would mean unplugging the sensor inside the case
-// downgrades the device to press-to-authenticate — far easier than forging the
-// UART link, and it would defeat the sensor entirely for anyone holding the
-// device. Compiled out, removing the sensor yields a device that cannot
-// authenticate at all, which is the correct failure.
-//
-// 1 only for bench boards with no sensor: cmake -DBUTTON_AUTHENTICATES=1
-#ifndef BUTTON_AUTHENTICATES
-#define BUTTON_AUTHENTICATES 0
-#endif
-
+// The button configures the device and never authenticates it. Its two jobs are
+// the factory reset gesture and opening fingerprint enrolment, both of which are
+// gated on something other than the click itself.
 #ifndef BUTTON_GPIO
 #define BUTTON_GPIO 12
 #endif

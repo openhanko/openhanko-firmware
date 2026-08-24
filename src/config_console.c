@@ -93,7 +93,7 @@ bool config_console_awaiting_press(void) {
 //
 // CHIP_ID.REVISION cannot answer this: A4 changed only the boot ROM, so it
 // reports the same revision as A3. picotool reads this same byte for the same
-// reason. On RP2040 the byte identifies B0/B1/B2.
+// reason.
 //
 // It matters because three of the RP2350 Hacking Challenge findings are fixed in
 // silicon and in no other way. On A2 a glitched chip can re-enable debug and read
@@ -102,21 +102,12 @@ bool config_console_awaiting_press(void) {
 // property, and this is how to read it off an assembled device.
 static const char *chip_stepping(void) {
   uint8_t rom_version = *(const volatile uint8_t *)0x00000013;
-#if defined(PICO_RP2350) && PICO_RP2350
   switch (rom_version) {
     case 2:  return "rp2350-a2";
     case 3:  return "rp2350-a3";
     case 4:  return "rp2350-a4";
     default: return "rp2350-unknown";
   }
-#else
-  switch (rom_version) {
-    case 1:  return "rp2040-b0";
-    case 2:  return "rp2040-b1";
-    case 3:  return "rp2040-b2";
-    default: return "rp2040-unknown";
-  }
-#endif
 }
 
 static bool config_authorized(void) {
@@ -163,13 +154,9 @@ static void handle_command(void) {
     int status_len = snprintf(line, sizeof(line),
              "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
-             // What actually authorises a signature on this build. The button
-             // only does when compiled in for a bench board with no sensor.
-#if BUTTON_AUTHENTICATES
-             fingerprint_present() ? "fingerprint" : "button",
-#else
+             // What can authorise a signature. Without a sensor nothing can:
+             // the button configures the device and never authenticates it.
              fingerprint_present() ? "fingerprint" : "none",
-#endif
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),

@@ -1,5 +1,7 @@
 #pragma once
 
+// TinyUSB's name for the whole RP2 family, RP2350 included — it has no separate
+// RP2350 constant, and the USB controller is the same one.
 #define CFG_TUSB_MCU OPT_MCU_RP2040
 #define CFG_TUSB_OS OPT_OS_PICO
 

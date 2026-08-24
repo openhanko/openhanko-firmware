@@ -2,7 +2,7 @@
 //
 // Copy this file to secrets.h and fill in real PEMs, or just run:
 //
-//     ./provision.py gen-secrets --output rp2040/secrets.h
+//     ./provision.py gen-secrets --output src/secrets.h
 //
 // which generates the keys and writes a correctly formatted secrets.h for you.
 //

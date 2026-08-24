@@ -112,9 +112,9 @@ bool fingerprint_light(fp_light_t effect, fp_color_t color, uint8_t cycles);
 // "absent", or the enrolled template count, for STATUS.
 const char *fingerprint_status_text(void);
 
-// Draws 4 bytes from the module's hardware RNG. Worth having on the RP2040,
-// whose own randomness is ring-oscillator jitter — but mix it, never trust it
-// alone: this is an opaque module from a vendor nobody has audited.
+// Draws 4 bytes from the module's hardware RNG. Worth having as a second source
+// to mix in — but only ever mixed, never trusted alone: this is an opaque module
+// from a vendor nobody has audited.
 bool fingerprint_random(uint32_t *out);
 
 // Four 8-byte ASCII fields out of the module's info page. Padded strings are

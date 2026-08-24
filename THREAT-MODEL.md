@@ -11,7 +11,7 @@ claimed. That separation is the point of the document: earlier drafts of our own
 README claimed a locked debug port and a `sudo` limitation that were both
 untrue, in opposite directions.
 
-Last checked against `rp2040/` at the commit adding this file.
+Last checked against `src/` after bring-up on RP2350 A4 with a real ZW111.
 
 ---
 
@@ -55,7 +55,6 @@ meaningless without saying which one it describes.
 
 | state | debug port | key at rest | glitch errata |
 | --- | --- | --- | --- |
-| **RP2040** (development) | always open | plaintext, readable over SWD | n/a |
 | **RP2350 A2** | lockable | plaintext in external QSPI | E16, E20, E24 all open |
 | **RP2350 A4**, no lockdown | open until fused | plaintext in external QSPI | fixed in silicon |
 | **RP2350 A4** + secure boot + SWD fused | closed | plaintext in external QSPI | fixed in silicon |
@@ -65,12 +64,14 @@ meaningless without saying which one it describes.
 Only the last row makes a stolen device inert. Read `chip=` from `STATUS` to
 find out which silicon is in front of you; nothing else reports it reliably.
 
-**Everything shipped so far is row 1.** Keys generated on an RP2040 come from
-ring-oscillator jitter and are development-only regardless.
+**Everything so far is row 2** — A4 silicon with nothing fused. The RP2354A's
+in-package flash raises the cost of the offline attack even at that row: there is
+no separate chip to lift off, so reading it means decapsulation rather than hot
+air.
 
 ## 5. Today: what actually gates what
 
-Verified in `rp2040/piv.c`:
+Verified in `src/piv.c`:
 
 | operation | what it requires | what that costs an attacker holding the device |
 | --- | --- | --- |
@@ -116,8 +117,10 @@ That last line is the real product: **against attacker A, the device works.**
 is worth having only together with the user's Mac, and the exposure ends at that
 Mac.
 
-Presence is a button press, so it proves *someone* is there, not *who*. The
-fingerprint sensor is what would change that and it is untested against hardware.
+Presence is a fingerprint match, verified on hardware. It proves a finger
+enrolled on this device is present — which is a claim about *who*, bounded by
+what the sensor can distinguish and by the fact that the link carrying the answer
+is unauthenticated.
 
 ### Remote-capable credentials — SSH, PGP, CA-issued certificates, code signing
 
@@ -170,12 +173,14 @@ per session, then touch — not a flag flip.
    work first, which needs RP2350.
 2. **Key material is plaintext at rest**, and on RP2350-Zero that flash is a
    separate package.
-3. **Sensor untested**, so presence is still a button and proves nothing about
-   identity.
-4. **Module binding unproven.** `PS_ReadINFpage` (`0x16`) is implemented but
-   untested, and it is not known whether the serial it returns is per-unit or
-   per-model. Per-model would make binding nearly worthless.
-5. **No rate limiting** on signature operations.
+3. **Module binding not built.** `PS_GetChipSN` (`0x34`) returns a 32-byte
+   per-die serial and is implemented, but nothing binds to it yet, and one
+   module is not enough to confirm the value differs between units.
+4. **No rate limiting** on signature operations.
+5. **A touch authorises a window, not an operation.** Slot 9A accepts any
+   signature for 10 s after a match and slot 9D for 60 s, the latter not
+   consumed on use. In driverless mode this is structural — the card is told
+   nothing until a PIN arrives, so the touch has to come first.
 
 ## 9. Claims we may and may not make
 
@@ -192,9 +197,11 @@ per session, then touch — not a flag flip.
 **May not, today:**
 
 - ~~"The debug port is locked."~~ Not enabled on any unit.
-- ~~"Tamper-resistant."~~ No secure element; on RP2040 the key is readable over SWD.
+- ~~"Tamper-resistant."~~ No secure element, and SWD is not fused on any unit yet.
 - ~~"Safe for SSH keys."~~ Precisely the case with no defence.
-- ~~"The fingerprint proves it is you."~~ Sensor untested, and the link is forgeable.
+- ~~"The fingerprint proves it is you."~~ It proves an enrolled finger is on the
+  sensor, which is not the same claim: the link carrying that answer is
+  unauthenticated, so someone who opens the case can assert it without a finger.
 
 **Must state plainly:** a stolen device is a full compromise of every credential
 on it. For local unlock that is bounded by needing the user's Mac. For anything

@@ -3,7 +3,7 @@
 // Trimmed mbedTLS build. This firmware only needs to parse a PKCS#8 RSA private
 // key, run the private-key operation, hash with SHA-256, and base64-decode PEM.
 // No TLS, no x509 verification, no ECC — every extra module is flash the
-// RP2040 does not have to spare.
+// the part does not have to spare.
 
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_MEMORY
@@ -48,7 +48,7 @@
 #define MBEDTLS_ECDH_C
 #define MBEDTLS_ECP_DP_SECP256R1_ENABLED
 
-// RFC 6979. The RP2040 has no hardware TRNG, and a predictable ECDSA nonce
+// RFC 6979. A predictable ECDSA nonce
 // recovers the private key from a single signature — so the nonce is derived
 // from the key and message instead of being drawn from the RNG at all. This is
 // not optional on this part. Needs HMAC_DRBG.

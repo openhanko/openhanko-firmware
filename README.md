@@ -27,11 +27,8 @@ Not done:
 
 - `fingerprint.c` is written against the EF-01 protocol but **untested against a
   module**, and so is the enrollment gesture built on it.
-- A board with no sensor needs `-DBUTTON_AUTHENTICATES=ON` to be usable at all,
-  since the button does not authenticate in a default build. That is a bench
-  build, not a shipping one.
-- Not yet ported to RP2350. Keys generated on an RP2040 are development-only.
 - Secure boot, OTP and debug lockout are not enabled.
+- The custom RP2354A boards are at fab; development is on an RP2350-Zero.
 
 ## Compared with tinyTouch
 
@@ -46,9 +43,9 @@ Measured against `firmware/tiny_touch_smartcard` as of August 2026.
 
 | | tinyTouch | OpenHanko |
 | --- | --- | --- |
-| MCU | ESP32-S3 | RP2040; RP2350 is the target |
+| MCU | ESP32-S3 | RP2354A — RP2350 with in-package flash |
 | signing algorithms | RSA-2048 only — the sign path returns `6f00` for any key that is not RSA, and `GENERAL AUTHENTICATE` rejects any `P1` but `0x07` | P-256 (`0x11`) and RSA-2048 (`0x07`), checked against the key actually loaded |
-| signature time | — | 469 ms P-256, 2924 ms RSA-2048, on an RP2040 |
+| signature time | — | 196 ms P-256 on an RP2350 |
 | ECDSA nonce | n/a | RFC 6979 deterministic |
 | where the key comes from | provisioned from a host, or compiled into the image | **generated on the device at first boot**; both host paths kept as alternatives |
 | does the private key exist off-device | yes — on whatever machine generated it | no, on the generate-on-device path |
@@ -105,16 +102,34 @@ concept and is a good one.
 
 ## Hardware
 
-| part | role |
-| --- | --- |
-| **RP2350** | target: secure boot, OTP debug lockout, hardware TRNG |
-| **RP2040** | development; every measurement below is from this part |
+**RP2354A** — an RP2350 die with 2 MB of flash stacked in the same package —
+with an HLK-ZW111 fingerprint module. Development is on an RP2350-Zero with the
+sensor wired to the same pins.
 
-`rp2040/` builds for both. The RP2350 matters for keys rather than speed: it
-verifies a signed image at boot, permanently disables SWD through OTP, and seeds
-`get_rand_64()` from a real TRNG. The RP2040 does none of these — its debug port
-is always open, so anyone who opens the case reads the key out and steps around
-the sensor entirely.
+Three properties make this the part rather than a faster one. It verifies a
+signed image at boot; it can permanently disable SWD through OTP; and
+`get_rand_64()` is backed by a hardware TRNG, which is what makes a generated key
+worth anything — a key is only as good as the randomness behind it, and one
+generated without a true entropy source looks like a key and is not.
+
+The stacked flash matters too. On a part with an external flash chip, lifting it
+off with hot air and reading it is a ten-minute job needing no skill. In-package,
+that becomes decapsulation and probing — still possible, no longer casual.
+
+**Buy A4 stepping.** Errata E16, E20 and E24 are fixed in silicon and in no other
+way; on A2 a glitched chip can re-enable debug and read OTP, boot unsigned code,
+or have secure boot defeated with a laser. `STATUS` reports what you actually
+have as `chip=`.
+
+### Why not the RP2040
+
+It was the development platform through most of this project and is no longer
+supported. Its debug port cannot be closed, so anyone who opens the case reads
+the key out and steps around the sensor entirely — which makes the fingerprint
+decorative rather than protective. And `get_rand_64()` there is ring-oscillator
+jitter, so keys generated on one are development keys whatever else is done. It
+was also 2.4× slower at the only operation that matters: 469 ms to sign against
+196 ms here.
 
 ### Pinout
 
@@ -129,17 +144,6 @@ PCB would be invisible; `STATUS_LED_GPIO` is `-1` and `status_led.c` compiles to
 no-ops. Every indication goes to the module's ring, including the factory reset
 gesture — which had driven only the board LED, and would otherwise have run an
 irreversible operation with no feedback at all.
-
-The RP2040-Zero development board differs in exactly those places, so it has its
-own build:
-
-```sh
-cmake -S rp2040 -B build-bench -DBENCH_BOARD=ON
-```
-
-which moves the button to GP10, enables the WS2812 on GP16, and lets the button
-authenticate because there is no sensor fitted. It warns at configure time.
-Never ship an image built that way.
 
 The ZW111 harness is six wires, not four:
 
@@ -182,7 +186,7 @@ debugging, set `FINGERPRINT_REQUIRE_TOUCH 0`.
 
 ### Which stepping am I holding?
 
-`STATUS` reports it as `chip=`, e.g. `chip=rp2350-a4` or `chip=rp2040-b2`.
+`STATUS` reports it as `chip=`, e.g. `chip=rp2350-a4`.
 
 Read from the boot ROM version byte at `0x00000013`, not from
 `CHIP_ID.REVISION` — **A4 changed only the boot ROM and reports the same
@@ -224,7 +228,7 @@ certification; that needs a VID of your own.
 macOS builds the reader name by concatenating the manufacturer and product
 strings, so they must differ or the pairing dialog reads "OpenHanko OpenHanko".
 
-Defaults live in [`rp2040/board_config.h`](rp2040/board_config.h). For a bare
+Defaults live in [`src/board_config.h`](src/board_config.h). For a bare
 board with nothing wired, set `BUTTON_USE_BOOTSEL 1` to borrow the BOOTSEL
 button. BOOTSEL sits on the QSPI bus rather than the GPIO bank, so reading it
 overrides the flash chip-select and blacks out interrupts for tens of
@@ -235,13 +239,13 @@ Bench use only.
 
 ```sh
 export PICO_SDK_PATH=~/.pico-sdk/sdk/2.2.0
-cd rp2040 && cmake -S . -B build && cmake --build build
+cd src && cmake -S . -B build && cmake --build build
 ```
 
 Hold BOOTSEL while replugging, then copy the image onto the volume that appears:
 
 ```sh
-cp -X build/smart_card_rp2040.uf2 /Volumes/RPI-RP2/
+cp -X build/openhanko.uf2 /Volumes/RP2350/
 ```
 
 **Double-tap RESET** within 800 ms to enter the bootloader without the BOOTSEL
@@ -254,25 +258,14 @@ directory caches it, so a missing SDK only surfaces on a clean checkout.
 
 ## The button does not authenticate
 
-On a unit with a sensor fitted, a fingerprint match is the only thing that
-authorises a signature. The button has two jobs, both configuration: the factory
-reset gesture, and opening fingerprint enrollment.
+A fingerprint match is the only thing that authorises a signature. The button has
+two jobs, both configuration: the factory reset gesture, and opening enrolment.
 
-That is enforced at compile time, not at runtime. A runtime rule — "fall back to
-the button when no module answers" — would mean unplugging the sensor inside the
-case downgrades the device to press-to-authenticate, which is far easier than
-forging the UART link and would defeat the sensor for anyone holding the device.
-Built the default way there is no such path in the binary at all, so removing the
-sensor yields a device that cannot authenticate rather than one that
-authenticates trivially.
-
-Bench boards with no sensor need the button back:
-
-```sh
-cmake -S rp2040 -B build -DBUTTON_AUTHENTICATES=ON
-```
-
-which prints a warning at configure time. Never build a unit that way.
+There is no build in which that is untrue. There was briefly a flag for bench
+boards with no sensor fitted, and it is gone — a switch whose only function is to
+restore press-to-authenticate is a switch someone eventually ships. Removing the
+sensor from a unit now yields a device that cannot authenticate at all, which is
+the correct failure.
 
 ## Enrolling a finger
 
@@ -337,9 +330,9 @@ CD01D8E61DB4E82E005F560781284FCE79FA764A   vden - Certificate For PIV Authentica
 So a device states its own name over the console, and that name identifies its
 keychain entry. Two devices on one Mac are told apart without unplugging either.
 
-`get_rand_64()` is the limit. On the RP2040 it is ring-oscillator jitter, not a
-trustworthy source for long-lived keys. On the RP2350 the same call is backed by
-the hardware TRNG.
+`get_rand_64()` is backed by the RP2350's hardware TRNG, which is the reason a
+key generated here is worth trusting and one generated on a part without a true
+entropy source is not.
 
 ### Two other ways to load one
 
@@ -347,7 +340,7 @@ the hardware TRNG.
 
 ```sh
 ./provision.py provision              # generate on your Mac, push over CDC into flash
-./provision.py gen-secrets            # generate and write rp2040/secrets.h, then reflash
+./provision.py gen-secrets            # generate and write src/secrets.h, then reflash
 ```
 
 `provision` writes no private key to disk unless you pass `--keep-keys DIR`.
@@ -448,7 +441,7 @@ pinpad mode                  ▼
 The probe is the mechanism: only our driver knows to ask for the private AID, so
 a SELECT of it proves the driver is installed. The device is never told.
 
-All four transitions measured on an RP2040:
+All four transitions measured on hardware:
 
 | behaviour | evidence |
 | --- | --- |
@@ -531,29 +524,30 @@ stays that way until something clears it — hence the boot-time clear.
 
 ### Use P-256, not RSA-2048
 
-| `BENCH` signing | RSA-2048 | ECC P-256 |
-| --- | ---: | ---: |
-| RP2040 @133 MHz | 2924 ms | **469 ms** |
+| `BENCH` signing | measured |
+| --- | ---: |
+| P-256 on RP2350 | **196 ms** |
+| P-256 on RP2040, for comparison | 469 ms |
+| RSA-2048 on RP2040 | 2924 ms |
 
-| end to end on an RP2040 | RSA-2048 | ECC P-256 |
-| --- | ---: | ---: |
-| press to authenticated | ~2960 ms | **605 ms** |
-| APDU transfers for the challenge | 2 (chained) | 1 |
-| compiled identity (`secrets.h`) | 6.2 kB | 3.4 kB |
+| end to end | |
+| --- | ---: |
+| touch to authenticated, pinpad | ~210 ms |
+| APDU transfers for the challenge | 1 (2 chained for RSA) |
+| compiled identity (`secrets.h`) | 3.4 kB P-256, 6.2 kB RSA |
 
-RSA is slow because the RP2040 has no big-integer accelerator and the Cortex-M0+
-has no 64-bit multiply. Signing runs synchronously inside the CCID transfer
-callback, so USB stalls for the whole operation. macOS waited patiently even at
-three seconds, so this is comfort rather than correctness.
+RSA is slow because there is no big-integer accelerator. Signing also runs
+synchronously inside the CCID transfer callback, so USB stalls for the whole
+operation — tolerable at 200 ms, not at three seconds.
 
 macOS picks the algorithm from the certificate with no configuration: a P-256
 cert gets `GENERAL AUTHENTICATE` with `P1 = 0x11` instead of `0x07`.
 
 ### ECDSA is RFC 6979 deterministic
 
-`MBEDTLS_ECDSA_DETERMINISTIC`, and not optional. The RP2040 has no hardware
-TRNG, and a predictable ECDSA nonce recovers the private key from a single
-signature. Deriving the nonce from the key and message takes the RNG out of the
+`MBEDTLS_ECDSA_DETERMINISTIC`, and not optional. A predictable ECDSA nonce
+recovers the private key from a single signature, and taking the RNG out of the
+signing path removes that whole class of failure rather than mitigating it. Deriving the nonce from the key and message takes the RNG out of the
 signing path entirely.
 
 ### EC keys must use named-curve encoding
@@ -620,7 +614,7 @@ through `SecKeyCreateSignature`. It was removed because:
   TCC grant before login.
 - **A registered wireless token starves a wired card.** A persistent token is
   always "present", so it wins against a reader-backed token permanently and
-  silently. Measured: the RP2040 stopped authenticating entirely while an
+  silently. Measured: the wired card stopped authenticating entirely while an
   out-of-range wireless device held the slot.
 - It adds a battery, a charger and a radio to a device you plug in.
 
@@ -747,7 +741,7 @@ short version:
 ## Layout
 
 ```
-rp2040/                builds for RP2040 and RP2350
+src/                   device firmware, RP2350 family
   board_config.h       pins, AID default, timings
   main.c               cooperative loop: presence, indicator, mode switching
   piv.c                PIV applet: certificates, VERIFY, GENERAL AUTHENTICATE,
