@@ -153,7 +153,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     int status_len = snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
+             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
              // What can authorise a signature. Without a sensor nothing can:
              // the button configures the device and never authenticates it.
@@ -169,6 +169,10 @@ static void handle_command(void) {
              // Whether the button was down when the device booted. Reported so
              // the reset gesture can be verified without watching the LED.
              button_held_at_boot() ? "yes" : "no",
+             // Live pin state. A gate that keeps reporting NO_PRESS is either a
+             // person who did not press or a wire that came off, and those are
+             // not distinguishable from the other end of a console.
+             button_is_down() ? "down" : "up",
              fingerprint_status_text(),
              !fingerprint_touch_wired() ? "unwired"
                                         : (fingerprint_touch_asserted() ? "down" : "up"),

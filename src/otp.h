@@ -48,9 +48,26 @@
 // does not depend on a decision made today.
 #define OTP_PAGE_ROWS 64u
 
-#define OTP_SECRET_PAGE 4u
-#define OTP_SECRET_ROW  (OTP_SECRET_PAGE * OTP_PAGE_ROWS)   /* 0x100 */
-#define OTP_SECRET_LEN  32u
+// The secret is stored chaffed: every bit sits beside its own complement, so
+// each adjacent pair reads as one-and-zero whichever way the bit went.
+//
+// That is aimed at one specific attack. IOActive's passive voltage contrast with
+// a focused ion beam reads antifuse cells directly rather than through any access
+// control, recovering the bitwise OR of adjacent bits — and it is the one finding
+// from the Hacking Challenge that A4 does *not* fix. Against complementary pairs
+// that OR is 1 everywhere and says nothing. It is Raspberry Pi's own published
+// mitigation, and it costs only double the rows.
+//
+// Page 4 layout. Rows 0x100-0x11f are deliberately left blank: development
+// boards wrote an unchaffed secret there before this existed, and OTP has no
+// erase, so the region cannot be reused. Placing the real secret in the second
+// half means one firmware works on those boards and on fresh ones alike, at a
+// cost of 32 rows out of 3720.
+#define OTP_SECRET_PAGE   4u
+#define OTP_SECRET_ROW    0x120u
+#define OTP_SECRET_LEN    32u
+// Two bits stored per bit of secret.
+#define OTP_SECRET_STORED (OTP_SECRET_LEN * 2u)
 
 #define OTP_LINK_KEY_PAGE 5u
 #define OTP_LINK_KEY_ROW  (OTP_LINK_KEY_PAGE * OTP_PAGE_ROWS) /* 0x140 */
