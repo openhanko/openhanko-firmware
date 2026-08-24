@@ -133,9 +133,13 @@ stated in the product documentation in these words, not softened.
 
 ### Physical possession
 
-**Not defended, and not fixable at the sensor.** The ZW111 link is plain UART
-with no authenticated mode and a 4-byte password sent in clear on every
-power-up. An attacker who opens the case can drive the harness and forge a match
+**Not defended, though swapping the sensor no longer works.** The device records
+its module's `PS_GetChipSN` and refuses everything if it later meets a different
+one, so the cheap attack — fit a module you control — is closed.
+
+What remains is the link itself, which is plain UART with no authenticated mode
+and a 4-byte password that is not merely sent in clear but readable from the
+parameter page. An attacker who opens the case can drive the harness and forge a match
 response, and secure boot, SWD lockout and OTP protection all keep working
 correctly — they are not in that path.
 
@@ -151,7 +155,7 @@ Ordered by what they actually close, not by effort.
 | Secure boot + SWD fused | reading the key off a live device through the debug port | desoldering the flash |
 | **Key wrapped to an OTP secret** | attacker B — flash reader yields ciphertext | attacker C, who has the die and can ask the firmware to sign |
 | OTP **chaffing** (complementary bit pairs) | the IOActive PVC/FIB antifuse read — the one hardware attack **A4 does not fix** | — |
-| Sensor binding via `PS_ReadINFpage` | swapping in a stock module — **only if the serial is per-unit, which is unconfirmed** | an emulator replaying the expected serial |
+| Sensor binding via `PS_GetChipSN` *(done)* | swapping the module for another — the serial is per-die, confirmed across two units | an emulator replaying the expected serial |
 | `TouchOut` correlation *(done)*, staged protocol, timing bounds | replaying one packet on RX | reading the published protocol and driving two lines |
 | **PIN mixed into the wrapping KDF** | **attacker C** — a stolen device is inert, forging a match unwraps nothing | someone who watches the user type the PIN |
 
@@ -173,11 +177,8 @@ per session, then touch — not a flag flip.
    work first, which needs RP2350.
 2. **Key material is plaintext at rest**, and on RP2350-Zero that flash is a
    separate package.
-3. **Module binding not built.** `PS_GetChipSN` (`0x34`) returns a 32-byte
-   per-die serial and is implemented, but nothing binds to it yet, and one
-   module is not enough to confirm the value differs between units.
-4. **No rate limiting** on signature operations.
-5. **A touch authorises a window, not an operation.** Slot 9A accepts any
+3. **No rate limiting** on signature operations.
+4. **A touch authorises a window, not an operation.** Slot 9A accepts any
    signature for 10 s after a match and slot 9D for 60 s, the latter not
    consumed on use. In driverless mode this is structural — the card is told
    nothing until a PIN arrives, so the touch has to come first.
