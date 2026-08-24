@@ -10,9 +10,8 @@ void piv_reload_keys(void);
 // True once a usable certificate is loaded, from either source.
 bool piv_has_identity(void);
 
-// Where the loaded identity came from: "flash", "compiled", or "none".
-// A generated or console-provisioned identity in flash takes precedence over one
-// baked into the firmware by secrets.h.
+// Where the loaded identity came from: "flash" or "none". There is one source:
+// the key the device generated for itself at first boot.
 const char *piv_key_source_name(void);
 
 // "rsa2048", "p256", or "none".
@@ -49,16 +48,6 @@ bool piv_challenge_active(void);
 
 // True for a moment after a successful signature, to confirm it visually.
 bool piv_recent_signature(void);
-
-// Pairing mode waives the per-signature presence requirement for a couple of
-// minutes so `sc_auth pair` can complete its handshake unattended.
-void piv_set_pairing_mode(bool enabled);
-bool piv_pairing_mode_active(void);
-
-// Times one RSA private-key operation, in milliseconds; 0 if no key is loaded.
-// There is no big-integer accelerator, so this is the number that decides
-// whether the part is fast enough to be pleasant.
-uint32_t piv_benchmark_sign(void);
 
 // True once our driver has selected the private AID, which nothing else on the
 // system knows to ask for — so it is proof the driver is installed and bound.

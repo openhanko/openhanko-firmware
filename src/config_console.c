@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "button.h"
-#include "mbedtls/base64.h"
 #include "hardware/watchdog.h"
 #include "pico/bootrom.h"
 #include "pico/stdlib.h"
@@ -14,13 +13,13 @@
 #include "identity.h"
 #include "piv.h"
 #include "settings.h"
-#include "storage.h"
 #include "trace.h"
 #include "tusb.h"
 
-// One PROVISION_CHUNK line carries at most 480 base64 characters, so the
-// command buffer only has to be a little larger than that.
-#define COMMAND_CAP 640
+// Longest thing anyone sends is `AID_MODE standard`. The buffer is far larger
+// than that so a host pasting junk into the port is truncated rather than
+// running off the end.
+#define COMMAND_CAP 128
 #define CONFIG_WINDOW_MS (120u * 1000u)
 #define PRESS_WAIT_MS 15000u
 
@@ -121,25 +120,6 @@ static bool require_config_authorization(void) {
   return false;
 }
 
-static bool append_provision_chunk(char *arguments) {
-  char *separator = strchr(arguments, ' ');
-  if (!separator) return false;
-  *separator = '\0';
-
-  storage_slot_t slot = storage_slot_by_name(arguments);
-  if (slot == STORAGE_SLOT_COUNT) return false;
-
-  const unsigned char *encoded = (const unsigned char *)(separator + 1);
-  size_t encoded_length = strlen(separator + 1);
-  uint8_t decoded[480];
-  size_t decoded_length = 0;
-  if (mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_length,
-                            encoded, encoded_length) != 0) {
-    return false;
-  }
-  return storage_stage_append(slot, decoded, decoded_length);
-}
-
 static void handle_command(void) {
   // Sized for the STATUS line, which is the longest thing sent from here and
   // has grown twice. snprintf truncates in silence, so a field added without
@@ -153,7 +133,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     int status_len = snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
+             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x config=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
              // What can authorise a signature. Without a sensor nothing can:
              // the button configures the device and never authenticates it.
@@ -162,7 +142,6 @@ static void handle_command(void) {
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
-             piv_pairing_mode_active() ? "on" : "off",
              config_authorized() ? "unlocked" : "locked",
              settings_aid_mode_name(settings_aid_mode()),
              piv_private_aid_selected() ? "yes" : "no",
@@ -202,35 +181,6 @@ static void handle_command(void) {
       send_line("OK CONFIG_UNLOCK button seconds=120");
     }
 
-  } else if (strcmp(command, "PROVISION_BEGIN") == 0) {
-    if (!require_config_authorization()) return;
-    storage_stage_reset();
-    send_line("OK PROVISION_BEGIN");
-
-  } else if (strncmp(command, "PROVISION_CHUNK ", 16) == 0) {
-    if (!require_config_authorization()) return;
-    send_line(append_provision_chunk(command + 16) ? "OK PROVISION_CHUNK"
-                                                   : "ERR PROVISION_CHUNK");
-
-  } else if (strcmp(command, "PROVISION_COMMIT") == 0) {
-    if (!require_config_authorization()) return;
-    if (storage_stage_commit()) {
-      piv_reload_keys();
-      send_line("OK PROVISION_COMMIT");
-    } else {
-      send_line("ERR PROVISION_COMMIT");
-    }
-
-    } else if (strcmp(command, "BENCH") == 0) {
-    uint32_t ms = piv_benchmark_sign();
-    if (ms) {
-      snprintf(line, sizeof(line), "OK BENCH alg=%s sign_ms=%lu",
-               piv_algorithm_name(), (unsigned long)ms);
-    } else {
-      snprintf(line, sizeof(line), "ERR BENCH no_key");
-    }
-    send_line(line);
-
   } else if (strcmp(command, "TRACE") == 0) {
     trace_dump(send_line);
     send_line("OK TRACE");
@@ -238,39 +188,6 @@ static void handle_command(void) {
   } else if (strcmp(command, "TRACE_CLEAR") == 0) {
     trace_clear();
     send_line("OK TRACE_CLEAR");
-
-  } else if (strcmp(command, "PAIRING_MODE") == 0) {
-    if (demand_button_press()) {
-      piv_set_pairing_mode(true);
-      send_line("OK PAIRING_MODE seconds=120");
-    } else {
-      piv_set_pairing_mode(false);
-    }
-
-  } else if (strcmp(command, "PAIRING_MODE_OFF") == 0) {
-    piv_set_pairing_mode(false);
-    send_line("OK PAIRING_MODE_OFF");
-
-  } else if (strncmp(command, "ENROLL", 6) == 0) {
-    // Enrols a finger into a slot, defaulting to the next free one. Costs a
-    // press first: adding a fingerprint is adding a way to use the key, so it
-    // deserves the same physical proof as any other reconfiguration.
-    if (!fingerprint_present()) {
-      send_line("ERR ENROLL no_module");
-      return;
-    }
-    unsigned slot = fingerprint_template_count();
-    if (command[6] == ' ') slot = (unsigned)atoi(command + 7);
-    if (!demand_button_press()) return;
-
-    send_line("PROMPT FINGER place and lift, then place again");
-    if (fingerprint_enroll((uint16_t)slot, 30000)) {
-      snprintf(line, sizeof(line), "OK ENROLL slot=%u total=%u", slot,
-               fingerprint_template_count());
-      send_line(line);
-    } else {
-      send_line("ERR ENROLL");
-    }
 
   } else if (strcmp(command, "FINGERPRINT_INFO") == 0) {
     // Read-only and reveals nothing secret, so no press gate.
@@ -370,25 +287,6 @@ static void handle_command(void) {
         }
         send_line(line);
       }
-    }
-
-  } else if (strcmp(command, "FINGERPRINT_ERASE") == 0) {
-    if (!demand_button_press()) return;
-    send_line(fingerprint_erase_all() ? "OK FINGERPRINT_ERASE" : "ERR FINGERPRINT_ERASE");
-
-  } else if (strcmp(command, "GENERATE_IDENTITY") == 0) {
-    // Replaces the identity with a freshly generated one whose private key has
-    // never left this chip. Destroys the old one, so anything paired to it
-    // stops working until re-paired — hence the button press.
-    if (!require_config_authorization()) return;
-    if (!demand_button_press()) return;
-    if (identity_generate()) {
-      piv_reload_keys();
-      snprintf(line, sizeof(line), "OK GENERATE_IDENTITY cn=\"%s\"",
-               identity_common_name());
-      send_line(line);
-    } else {
-      send_line("ERR GENERATE_IDENTITY");
     }
 
   // There is deliberately no FACTORY_RESET here. Erasing a user's credentials

@@ -544,9 +544,10 @@ int main(void) {
   // A device that has never been given an identity makes its own, so a unit can
   // be flashed and boxed without any key material ever existing outside it.
   //
-  // Only when there is nothing at all: a provisioned identity in flash, or one
-  // compiled into secrets.h, is left alone. Otherwise every developer build
-  // would silently replace the identity their Mac is already paired with.
+  // Only when there is nothing at all. An identity already in flash is left
+  // alone, or every developer build would silently replace the one their Mac is
+  // already paired with. Replacing it deliberately is the factory reset, which
+  // is the only path there is now that GENERATE_IDENTITY is gone.
   if (!piv_has_identity()) {
     // The identity is wrapped with the device secret, so there has to be one
     // before there can be a key to store. Provisioning it here is the one moment

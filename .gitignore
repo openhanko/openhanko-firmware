@@ -2,12 +2,11 @@
 __pycache__/
 *.pyc
 
-# generated PIV material: never commit. secrets.h holds real private keys in
-# plaintext; only the .example.h templates are tracked.
+# key material: never commit. The device generates its own PIV identity and no
+# private key leaves it, but the secure-boot signing PEMs live on this machine.
 *.pem
 keys/
-*/main/secrets.h
-*/secrets.h
+out/
 
 # build output. Matches any tree, not just */build/ — build-rp2350/ and
 # build-bench/ slipped past the narrower pattern and landed 1400 files in a
@@ -20,7 +19,6 @@ build-*/
 */sdkconfig
 */sdkconfig.old
 .cache/
-out/
 
 # leftover bench build tree from the removed BUTTON_AUTHENTICATES flag
 build-bench/

@@ -6,16 +6,19 @@ POSIX file I/O so there is nothing to install first.
 
     ./provision.py ports
     ./provision.py status
-    ./provision.py gen-secrets     # bake keys into the firmware image
-    ./provision.py provision       # or store them over the console
     ./provision.py pair
     ./provision.py monitor
+
+There is no command here that puts a key on the device. It generates its own at
+first boot and no private key has ever left it; the two routes that used to
+upload one from this machine — a staged push over the console, and baking PEMs
+into the firmware image as secrets.h — are gone, along with the console commands
+that received them.
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 import getpass
 import glob
 import os
@@ -23,21 +26,10 @@ import re
 import select
 import subprocess
 import sys
-import tempfile
 import termios
 import time
 import tty
 
-OPENSSL = "/usr/bin/openssl"
-CHUNK = 480
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
-SECRETS_PATH = os.path.join(REPO_ROOT, "src", "secrets.h")
-SLOTS = (
-    ("cert9a", "cert_9a", "authentication certificate"),
-    ("key9a", "key_9a", "authentication private key"),
-    ("cert9d", "cert_9d", "key-management certificate"),
-    ("key9d", "key_9d", "key-management private key"),
-)
 
 
 class Failure(Exception):
@@ -176,113 +168,6 @@ def pick_port(explicit: str | None) -> str:
 # --------------------------------------------------------------------------
 
 
-def generate_identity(common_name: str, directory: str, algorithm: str = "ec") -> dict[str, str]:
-    """Generates the 9a/9d keypairs and self-signed certificates.
-
-    ec  -> NIST P-256, PIV algorithm 0x11. Signs in 196 ms.
-    rsa -> RSA-2048, PIV algorithm 0x07. Seconds, not milliseconds: neither part
-           has a big-integer accelerator, and it measured 2.9 s on the RP2040
-           the figure was taken on. Long enough that the device reads as broken.
-    """
-    if not os.path.exists(OPENSSL):
-        raise Failure("no openssl at /usr/bin/openssl")
-    if algorithm == "ec":
-        # ec_param_enc:named_curve is not optional. LibreSSL defaults to writing
-        # the curve out explicitly — field type, prime, generator, the lot — and
-        # mbedTLS rejects that with MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE unless
-        # MBEDTLS_PK_PARSE_EC_EXTENDED is enabled. Named curves are also what
-        # real PIV cards carry, and the key drops from 377 to 135 bytes.
-        keyspec = ["-newkey", "ec",
-                   "-pkeyopt", "ec_paramgen_curve:prime256v1",
-                   "-pkeyopt", "ec_param_enc:named_curve"]
-    elif algorithm == "rsa":
-        keyspec = ["-newkey", "rsa:2048"]
-    else:
-        raise Failure(f"unknown algorithm {algorithm!r}")
-
-    bundle: dict[str, str] = {}
-    for slot, label in (("9a", "authentication"), ("9d", "key management")):
-        key_path = os.path.join(directory, f"key-{slot}.pem")
-        cert_path = os.path.join(directory, f"cert-{slot}.pem")
-        subject = f"/CN={common_name} {label}/"
-        result = subprocess.run(
-            [OPENSSL, "req", *keyspec, "-nodes",
-             "-keyout", key_path, "-x509", "-sha256", "-days", "3650",
-             "-out", cert_path, "-subj", subject],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise Failure(f"openssl failed for slot {slot}: {result.stderr.strip()}")
-        with open(key_path, encoding="utf-8") as handle:
-            bundle[f"key_{slot}"] = handle.read()
-        with open(cert_path, encoding="utf-8") as handle:
-            bundle[f"cert_{slot}"] = handle.read()
-    return bundle
-
-
-# --------------------------------------------------------------------------
-# Commands
-# --------------------------------------------------------------------------
-
-
-def c_string(pem: str) -> str:
-    """Render a PEM as a sequence of C string literals, one per line."""
-    literals = []
-    for line in pem.splitlines():
-        escaped = line.replace("\\", "\\\\").replace('"', '\\"')
-        literals.append(f'"{escaped}\\n"')
-    return "\n".join(literals)
-
-
-def command_gen_secrets(args: argparse.Namespace) -> None:
-    destination = os.path.abspath(args.output or SECRETS_PATH)
-    if os.path.exists(destination) and not args.force:
-        # The build seeds a placeholder secrets.h, which is not worth protecting.
-        with open(destination, encoding="utf-8") as handle:
-            placeholder = "REPLACE_WITH" in handle.read()
-        if not placeholder:
-            raise Failure(f"{destination} holds real keys; pass --force to replace it")
-
-    name = args.name or f"smart-card-poc {getpass.getuser()}"
-    label = "P-256" if args.algorithm == "ec" else "RSA-2048"
-    say(f"Generating a {label} identity for '{name}'.")
-    with tempfile.TemporaryDirectory(prefix="smart-card-piv-") as directory:
-        bundle = generate_identity(name, directory, args.algorithm)
-
-    header = [
-        "// Generated by ./provision.py gen-secrets. Do not commit.",
-        "//",
-        "// These private keys are compiled into the firmware image, so every",
-        "// device flashed from that image shares this one identity.",
-        "",
-        "#pragma once",
-        "",
-    ]
-    fields = [
-        ("PIV_CERT_9A_PEM", "cert_9a"),
-        ("PIV_PRIVATE_KEY_9A_PEM", "key_9a"),
-        ("PIV_CERT_9D_PEM", "cert_9d"),
-        ("PIV_PRIVATE_KEY_9D_PEM", "key_9d"),
-    ]
-    body = []
-    for symbol, bundle_key in fields:
-        body.append(f"static const char {symbol}[] =")
-        body.append(c_string(bundle[bundle_key]) + ";")
-        body.append("")
-
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
-    with open(destination, "w", encoding="utf-8") as handle:
-        handle.write("\n".join(header + body))
-    os.chmod(destination, 0o600)
-
-    say(f"  wrote {destination}")
-    say("")
-    say("Now build and flash:")
-    say("  cd src && cmake -S . -B build && cmake --build build")
-    say("")
-    say("Then pair it:  ./provision.py pair")
-
-
 def command_ports(_: argparse.Namespace) -> None:
     ports = list_ports()
     if not ports:
@@ -317,64 +202,6 @@ def command_monitor(args: argparse.Namespace) -> None:
             say("")
 
 
-def command_provision(args: argparse.Namespace) -> None:
-    port = pick_port(args.port)
-    name = args.name or f"smart-card-poc {getpass.getuser()}"
-
-    with Console(port) as console:
-        say(f"device: {port}")
-        for line in console.send("STATUS", timeout=5):
-            say(f"  {line}")
-
-        say("")
-        say("Unlocking configuration. If the device already holds keys, it will")
-        say("ask for a button press to prove you have physical access.")
-        console.send("CONFIG_UNLOCK", timeout=25)
-
-        say("")
-        label = "P-256" if args.algorithm == "ec" else "RSA-2048"
-        say(f"Generating a fresh {label} identity for '{name}'.")
-        with tempfile.TemporaryDirectory(prefix="smart-card-piv-") as directory:
-            bundle = generate_identity(name, directory, args.algorithm)
-            if args.keep_keys:
-                target = os.path.abspath(args.keep_keys)
-                os.makedirs(target, exist_ok=True)
-                for filename in os.listdir(directory):
-                    with open(os.path.join(directory, filename), encoding="utf-8") as src:
-                        content = src.read()
-                    destination = os.path.join(target, filename)
-                    with open(destination, "w", encoding="utf-8") as dst:
-                        dst.write(content)
-                    os.chmod(destination, 0o600)
-                say(f"  copy of the private keys written to {target}")
-
-            say("Storing it on the device.")
-            console.send("PROVISION_BEGIN", timeout=5)
-            for device_name, bundle_key, label in SLOTS:
-                say(f"  · {label}")
-                encoded = base64.b64encode(bundle[bundle_key].encode("utf-8")).decode("ascii")
-                for offset in range(0, len(encoded), CHUNK):
-                    console.send(
-                        f"PROVISION_CHUNK {device_name} {encoded[offset:offset + CHUNK]}",
-                        timeout=5, echo=False,
-                    )
-            console.send("PROVISION_COMMIT", timeout=10)
-
-        say("")
-        say("Re-enumerating USB so macOS re-reads the card.")
-        try:
-            console.send("USB_RECONNECT", timeout=3)
-        except Failure:
-            # The USB detach usually beats the acknowledgment back to the host.
-            pass
-
-    time.sleep(2.0)
-    say("")
-    say("Done. Next:")
-    say("  system_profiler SPSmartCardsDataType   # macOS should list the card")
-    say("  ./provision.py pair              # link it to your account")
-
-
 def command_pair(args: argparse.Namespace) -> None:
     port = pick_port(args.port)
 
@@ -402,11 +229,6 @@ def command_pair(args: argparse.Namespace) -> None:
     preferred = [item for item in identities if "authentication" in item[1].lower()]
     chosen = (preferred or identities)[0]
     say(f"  found: {chosen[0]}  {chosen[1]}")
-
-    say("")
-    say("Enabling pairing mode so the handshake does not need a finger per signature.")
-    with Console(port) as console:
-        console.send("PAIRING_MODE", timeout=25)
 
     pair_command = ["sc_auth", "pair", "-u", getpass.getuser(), "-h", chosen[0]]
     say("")
@@ -439,26 +261,6 @@ def main() -> int:
                           parents=[port_option]).set_defaults(handler=command_status)
     subparsers.add_parser("monitor", help="print device events until Ctrl-C",
                           parents=[port_option]).set_defaults(handler=command_monitor)
-
-    secrets = subparsers.add_parser(
-        "gen-secrets", help="generate keys and write src/secrets.h")
-    secrets.add_argument("--name", help="common name to put in the certificates")
-    secrets.add_argument("--output", metavar="PATH", help="write somewhere other than src/secrets.h")
-    secrets.add_argument("--force", action="store_true", help="overwrite an existing secrets.h")
-    secrets.add_argument("--algorithm", choices=("ec", "rsa"), default="ec",
-                         help="ec = P-256 (default, 196 ms per signature); "
-                              "rsa = RSA-2048, seconds per signature")
-    secrets.set_defaults(handler=command_gen_secrets)
-
-    provision = subparsers.add_parser("provision", help="generate and store a PIV identity",
-                                      parents=[port_option])
-    provision.add_argument("--name", help="common name to put in the certificates")
-    provision.add_argument("--keep-keys", metavar="DIR",
-                           help="also save the generated private keys to DIR")
-    provision.add_argument("--algorithm", choices=("ec", "rsa"), default="ec",
-                           help="ec = P-256 (default, 196 ms per signature); "
-                                "rsa = RSA-2048, seconds per signature")
-    provision.set_defaults(handler=command_provision)
 
     pair = subparsers.add_parser("pair", help="link the card to your macOS account",
                                  parents=[port_option])

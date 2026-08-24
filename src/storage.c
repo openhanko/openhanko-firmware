@@ -281,11 +281,3 @@ bool storage_erase(void) {
   loaded = false;
   return true;
 }
-
-storage_slot_t storage_slot_by_name(const char *name) {
-  if (strcmp(name, "cert9a") == 0) return STORAGE_CERT_9A;
-  if (strcmp(name, "key9a") == 0) return STORAGE_KEY_9A;
-  if (strcmp(name, "cert9d") == 0) return STORAGE_CERT_9D;
-  if (strcmp(name, "key9d") == 0) return STORAGE_KEY_9D;
-  return STORAGE_SLOT_COUNT;
-}

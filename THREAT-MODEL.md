@@ -89,25 +89,25 @@ Verified in `src/piv.c`:
 | `VERIFY` | any bytes — the PIN is discarded (`(void)data;`), always `9000`, 60 s window | nothing |
 | `GENERAL AUTHENTICATE` **slot 9D** (ECDH) | a fingerprint match inside a 60 s session window, not consumed on use | an enrolled finger |
 | `GENERAL AUTHENTICATE` **slot 9A** (sign) | a fingerprint match inside a 10 s window | an enrolled finger, which the user presents |
-| `PAIRING_MODE` | **a button press** — not even `CONFIG_UNLOCK` first; then 9A *and* 9D sign freely for 120 s | **one press of an external button** |
-| `CONFIG_UNLOCK`, then console config commands | a button press, then a 120 s window | one press |
+| `CONFIG_UNLOCK`, then `BOOTLOADER` | a button press, then a 120 s window | one press, and the bootloader still demands a signed image |
 | factory reset | button held through power-up; **no host path at all** | — |
 
 There is no PIN retry counter and no lockout, because there is no PIN to count
 against. `VERIFY` returns `9000` rather than the `63CX` retries-remaining a
 standard PIV card returns.
 
-**`PAIRING_MODE` is the exception to fingerprint-only, and it is a real one.**
-It calls `demand_button_press()` directly — it does not even sit behind
-`CONFIG_UNLOCK` — and what it grants is 120 seconds in which both 9A and 9D sign
-on demand. On a sealed unit that button is on the outside and the CDC console
-shares a cable with the card, so the exact capability the fingerprint exists to
-gate is reachable with one press and no finger.
+**The console can no longer reach a key.** `PAIRING_MODE` used to be the
+exception — one button press, no `CONFIG_UNLOCK` in front of it, and both 9A and
+9D signed on demand for 120 seconds. It was there to let `sc_auth pair` finish
+unattended, a requirement that turned out not to exist: pairing binds a
+public-key hash read from the certificate and never asks the card to sign.
 
-Its stated purpose is to let `sc_auth pair` finish unattended, which appears not
-to be a requirement that exists: pairing binds a public-key hash read from the
-certificate, and nothing in that path asks the card to sign. Listed in section 8
-as something to delete rather than to re-gate.
+It is gone, and so are the rest of the commands that could reach key material or
+templates: the staged identity upload, `GENERATE_IDENTITY`, `ENROLL`,
+`FINGERPRINT_ERASE`, and `BENCH`, which handed a host a signature as fast as the
+main loop would run one. What remains reads state or reboots. That matters
+because the console shares a cable with the card, so anything it can do, a
+compromised host can do.
 
 Slot 9D used to be the sharpest edge: ungated entirely, so a compromised host
 could run key agreement against it silently and at will. It is now gated on a
@@ -120,9 +120,10 @@ Verified on hardware: touch → 9A `9000` → 9D `9000` 1.2 s later, no prompts.
 
 ### What does hold today
 
-- **The private key never existed off-device** on the generate-on-device path.
-  No provisioning machine ever held it, so there is no copy to leak and no
-  vendor to trust.
+- **The private key never existed off-device.** Not "on the generate-on-device
+  path" — there is no other path. The two that could put a key on a device from
+  outside are removed, so no provisioning machine ever held one, there is no copy
+  to leak and no vendor to trust.
 - **Signing is RFC 6979 deterministic**, so a weak RNG cannot leak the key
   through a repeated or predictable nonce.
 - **Factory reset has no host-reachable path.** Malware cannot destroy a user's
@@ -199,20 +200,17 @@ per session, then touch — not a flag flip.
 
 ## 8. Gaps, ordered
 
-1. **`PAIRING_MODE` signs without a fingerprint.** One button press buys 120
-   seconds of free signing on 9A and 9D, from a host, over CDC. It dates from
-   bring-up, it has one caller, and the requirement it waives does not appear to
-   exist — so the fix is to remove the command, not to re-gate it. `CONFIG_UNLOCK`
-   is gated on the button too, but what it opens is configuration; demanding a
-   match there instead is the smaller follow-up.
-2. **No real PIN.** The remaining defence against attacker C, who holds the
+1. **No real PIN.** The remaining defence against attacker C, who holds the
    device and can drive the sensor link. The at-rest work it depended on is
    done, so this is now buildable rather than blocked.
-3. **The firmware is the oracle.** It can read the OTP secret — that is the
+2. **The firmware is the oracle.** It can read the OTP secret — that is the
    design — so a bug that leaks it costs everything the lockdown bought. A
    standing constraint, not a task: never add anything that returns it.
-4. **No rate limiting** on signature operations.
-5. **A touch authorises a window, not an operation.** Slot 9A accepts any
+3. **No rate limiting** on signature operations. Less reachable than it was —
+   `BENCH` used to hand any host an unlimited supply of them with no presence
+   check at all — but a fingerprint still opens a window rather than authorising
+   one operation.
+4. **A touch authorises a window, not an operation.** Slot 9A accepts any
    signature for 10 s after a match and slot 9D for 60 s, the latter not
    consumed on use. In driverless mode this is structural — the card is told
    nothing until a PIN arrives, so the touch has to come first.
@@ -222,7 +220,7 @@ per session, then touch — not a flag flip.
 **May, of a provisioned unit:**
 
 - The private key is generated on the device, never transmitted, never copied to
-  a host. No provisioning machine ever held it.
+  a host. There is no firmware path that could do otherwise.
 - It is stored encrypted, under a key the flash does not contain.
 - The debug port is fused shut and only firmware signed with our key will run.
 - A compromised host cannot sign without a fingerprint.

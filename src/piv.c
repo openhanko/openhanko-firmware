@@ -23,7 +23,6 @@
 // when it is missing, so the include is unconditional and the compiler tracks
 // it as a dependency. Placeholder content is detected below and ignored, which
 // is what makes the file effectively optional.
-#include "secrets.h"
 
 static const uint8_t PIV_AID[] = {0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00};
 static const uint8_t PIV_AID_VERSIONED[] = {0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00};
@@ -114,13 +113,11 @@ static bool module_mismatch;
 void piv_set_module_mismatch(bool mismatch) { module_mismatch = mismatch; }
 bool piv_module_mismatch(void) { return module_mismatch; }
 void piv_set_setup_incomplete(bool incomplete) { setup_incomplete = incomplete; }
-static uint32_t pairing_mode_until;
 static uint32_t challenge_until;
 static uint32_t signature_until;
 
 static const uint32_t PIN_VERIFIED_WINDOW_MS = (60000);
 static const uint32_t USER_PRESENCE_WINDOW_MS = (10000);
-static const uint32_t PAIRING_MODE_WINDOW_MS = (120000);
 // Slot 9d's gate. Deliberately longer than the 9a presence window and never
 // consumed: one press has to cover the login and the keychain work that follows
 // it, which arrives in several separate operations over some seconds.
@@ -168,19 +165,6 @@ const char *piv_algorithm_name(void) {
 
 bool piv_has_identity(void) {
   return cert_9a_der_len != 0;
-}
-
-// A secrets.h that still holds the example placeholders is worse than no
-// secrets.h at all, because it would enumerate as a card that cannot sign.
-static bool compiled_keys_usable(void) {
-  const char *const pems[] = {
-    PIV_CERT_9A_PEM, PIV_PRIVATE_KEY_9A_PEM,
-    PIV_CERT_9D_PEM, PIV_PRIVATE_KEY_9D_PEM,
-  };
-  for (size_t i = 0; i < sizeof(pems) / sizeof(pems[0]); i++) {
-    if (strstr(pems[i], "REPLACE_WITH")) return false;
-  }
-  return true;
 }
 
 static bool append_sw(uint8_t *response, size_t *response_len, size_t response_cap,
@@ -551,14 +535,6 @@ bool piv_recent_signature(void) {
   return window_open(signature_until, SIGNATURE_ACK_MS);
 }
 
-void piv_set_pairing_mode(bool enabled) {
-  pairing_mode_until = enabled ? now_ms() + PAIRING_MODE_WINDOW_MS : 0;
-}
-
-bool piv_pairing_mode_active(void) {
-  return window_open(pairing_mode_until, PAIRING_MODE_WINDOW_MS);
-}
-
 // Wraps a payload in the dynamic authentication template PIV answers with:
 // 7C L { 82 L <payload> }. Both a signature and an ECDH shared secret come back
 // this way, so the two paths share it rather than each building their own.
@@ -657,9 +633,8 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
     // keychain work after it. What it stops is a host using the key management
     // key with no interaction whatsoever, which was previously free — and free
     // to a compromised host, which is the attacker this device exists to resist.
-    if (!window_open(session_presence_until, SESSION_PRESENCE_WINDOW_MS) &&
-        !window_open(pairing_mode_until, PAIRING_MODE_WINDOW_MS)) {
-      LOG("slot 9d refused: no button press within the session window");
+    if (!window_open(session_presence_until, SESSION_PRESENCE_WINDOW_MS)) {
+      LOG("slot 9d refused: no fingerprint within the session window");
       // Tell the indicator and the driver that a press would help. Note that the
       // PIN verification is deliberately left standing: consuming it here would
       // make the retry fail for a second, unrelated reason.
@@ -707,10 +682,8 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
   // costs one button press. Slot 9d is deliberately not gated the same way —
   // see the key agreement branch above.
   if (apdu[3] == 0x9a) {
-    bool presence_valid = window_open(user_presence_until, USER_PRESENCE_WINDOW_MS);
-    bool pairing_valid = window_open(pairing_mode_until, PAIRING_MODE_WINDOW_MS);
-    if (!presence_valid && !pairing_valid) {
-      LOG("slot 9a refused: no button press within the presence window");
+    if (!window_open(user_presence_until, USER_PRESENCE_WINDOW_MS)) {
+      LOG("slot 9a refused: no fingerprint within the presence window");
       note_challenge();
       pin_verified_until = 0;
       user_presence_until = 0;
@@ -786,22 +759,14 @@ void piv_init(void) {
   const char *key_9d_pem = NULL;
   key_source = "none";
 
-  // A console-provisioned identity is per-device and deliberate, so it wins
-  // over whatever was compiled into the image.
+  // The only source there is. Keys arrive one way — generated on this chip at
+  // first boot — so there is nothing to prefer them over.
   if (storage_loaded()) {
     key_source = "flash";
     cert_9a_pem = storage_get(STORAGE_CERT_9A);
     key_9a_pem = storage_get(STORAGE_KEY_9A);
     cert_9d_pem = storage_get(STORAGE_CERT_9D);
     key_9d_pem = storage_get(STORAGE_KEY_9D);
-  }
-
-  if (!cert_9a_pem && compiled_keys_usable()) {
-    key_source = "compiled";
-    cert_9a_pem = PIV_CERT_9A_PEM;
-    key_9a_pem = PIV_PRIVATE_KEY_9A_PEM;
-    cert_9d_pem = PIV_CERT_9D_PEM;
-    key_9d_pem = PIV_PRIVATE_KEY_9D_PEM;
   }
 
   if (piv_keys_initialized) {
@@ -816,8 +781,8 @@ void piv_init(void) {
   cert_9d_der_len = 0;
 
   if (!cert_9a_pem) {
-    LOG("PIV identity is unconfigured; create secrets.h or run "
-                  "./provision.py provision");
+    LOG("PIV identity is unconfigured; it is generated at first boot, so this "
+        "means identity_generate() failed");
     return;
   }
 
@@ -834,21 +799,6 @@ void piv_init(void) {
   decode_pem_cert(cert_9d_pem, cert_9d_der, sizeof(cert_9d_der), &cert_9d_der_len);
   LOG("PIV identity loaded from %s (9a cert %u bytes, 9d cert %u bytes)",
            key_source, (unsigned)cert_9a_der_len, (unsigned)cert_9d_der_len);
-}
-
-uint32_t piv_benchmark_sign(void) {
-  mbedtls_pk_type_t type = mbedtls_pk_get_type(&auth_key);
-  if (type != MBEDTLS_PK_RSA && type != MBEDTLS_PK_ECKEY) return 0;
-  uint8_t hash[32] = {0};
-  uint8_t sig[256];
-  size_t sig_len = sizeof(sig);
-
-  uint32_t start = now_ms();
-  int rc = mbedtls_pk_sign(&auth_key, MBEDTLS_MD_SHA256, hash, sizeof(hash),
-                           sig, sizeof(sig), &sig_len, piv_rng, NULL);
-  uint32_t elapsed = now_ms() - start;
-  if (rc != 0) return 0;
-  return elapsed ? elapsed : 1;
 }
 
 void piv_reload_keys(void) {

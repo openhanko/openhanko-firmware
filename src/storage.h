@@ -30,14 +30,15 @@ const char *storage_get(storage_slot_t slot);
 
 void storage_init(void);
 
-// Staging: written by the console's PROVISION_* commands, committed as one
-// flash write so a interrupted provisioning cannot leave a half-written
+// Staging: written by identity_generate() as it produces each PEM, committed as
+// one flash write so an interrupted generation cannot leave a half-written
 // identity behind.
 void storage_stage_reset(void);
 bool storage_stage_append(storage_slot_t slot, const void *data, size_t length);
 bool storage_stage_commit(void);
 
-// Erases the sector, returning the device to the compiled-in identity if any.
+// Erases the sector. The device is then unconfigured and generates a fresh
+// identity at its next boot.
 bool storage_erase(void);
 
-storage_slot_t storage_slot_by_name(const char *name);
+

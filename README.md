@@ -26,8 +26,8 @@ a host.
 The sensor, the enrolment gesture, module binding, encryption at rest, secure
 boot and debug lockout are all working on hardware. What is left:
 
-- `PAIRING_MODE` still signs without a fingerprint, and `CONFIG_UNLOCK` still
-  opens on a button press — see
+- `CONFIG_UNLOCK` still opens on a button press rather than a fingerprint. What
+  it now gates is `BOOTLOADER` and nothing else — see
   [the button does not authenticate](#the-button-does-not-authenticate).
 - There is no real PIN, so a stolen device is worth what its credentials are
   worth. [THREAT-MODEL.md](THREAT-MODEL.md) says how far that goes.
@@ -58,7 +58,7 @@ Measured against `firmware/tiny_touch_smartcard` as of August 2026.
 | driver detection | none | private-AID probe: the device works out for itself whether its driver is installed, and switches mode both ways |
 | host software | Python LaunchAgent, AES/HMAC over HID | signed and notarised CryptoTokenKit extension |
 | factory reset without a host | no | button held through power-up, release commits |
-| on-device diagnostics | `STATUS` | `STATUS`, plus a `TRACE` ring buffer of CCID and APDU activity and `BENCH` |
+| on-device diagnostics | `STATUS` | `STATUS`, plus a `TRACE` ring buffer of CCID and APDU activity |
 | fingerprint sensor | ZW101 | ZW111, bound to the device by its per-die serial |
 | key material at rest | plaintext in NVS | AES-256-GCM under a secret in OTP |
 | secure boot | none | signed images, two keys with revocation |
@@ -280,12 +280,17 @@ is to restore press-to-authenticate is a switch someone eventually ships.
 Removing the sensor from a unit now yields a device that cannot authenticate at
 all, which is the correct failure.
 
-**`PAIRING_MODE` is the loose end.** It waives the presence requirement on both
-9A and 9D for 120 seconds, and it asks for a button press directly rather than
-going through `CONFIG_UNLOCK`. So there is one route to a signature that a press
-alone reaches, over CDC, from a host. It is tracked as the first item in
-[THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered) rather than described as
-something the design intends.
+`PAIRING_MODE` used to be the exception — a button press bought 120 seconds of
+signing on both 9A and 9D, without even going through `CONFIG_UNLOCK`. It is
+gone, along with every other console command that could reach a key or a
+template. Nothing on the console signs, enrols, erases or provisions any more,
+so the fingerprint is now the only thing that authorises a signature by any
+route.
+
+`CONFIG_UNLOCK` still asks for a press rather than a match. What it gates is
+`BOOTLOADER`, which reboots into the ROM bootloader — on a locked unit that
+still only accepts signed firmware, so the press buys an update path, not a
+key.
 
 ## Enrolling a finger
 
@@ -354,27 +359,19 @@ keychain entry. Two devices on one Mac are told apart without unplugging either.
 key generated here is worth trusting and one generated on a part without a true
 entropy source is not.
 
-### Two other ways to load one
+### There is no other way to load one
 
-`./provision.py` is stdlib-only — no pip install, no venv.
+There were two: a staged upload over the console, and `secrets.h`, which baked
+PEMs into the firmware image. Both are gone, along with `PROVISION_BEGIN` /
+`PROVISION_CHUNK` / `PROVISION_COMMIT` and the compiled-key path in `piv.c`.
 
-```sh
-./provision.py provision              # generate on your Mac, push over CDC into flash
-./provision.py gen-secrets            # generate and write src/secrets.h, then reflash
-```
+They were bench conveniences, and each of them made "the private key never
+existed off this chip" a claim about a *configuration* rather than about the
+device. Removing them makes it unconditional: `STATUS` reports `source=flash`
+or `source=none`, and there is no third answer.
 
-`provision` writes no private key to disk unless you pass `--keep-keys DIR`.
-`gen-secrets` bakes keys into the image, so every device flashed from it shares
-one identity — convenient for bench work, wrong for anything else. `secrets.h`
-is gitignored; if it is absent the firmware builds fine and waits, and if it
-still holds the `REPLACE_WITH` placeholders it is ignored with a warning.
-
-Precedence is flash over compiled-in. `STATUS` reports which won as
-`source=flash` or `source=compiled`.
-
-Both paths take `--algorithm ec` (default, P-256) or `--algorithm rsa`
-(RSA-2048). The firmware supports both and checks the host's `P1` against the
-key actually loaded.
+`./provision.py` is still stdlib-only — no pip install, no venv — and now only
+inspects and pairs.
 
 ### Factory reset
 
@@ -417,19 +414,23 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | command | effect |
 | --- | --- |
 | `PING` | → `PONG` |
-| `STATUS` | silicon stepping, key source, algorithm, AID mode, pairing, sensor, name |
+| `STATUS` | silicon stepping, key source, algorithm, AID mode, sensor, name |
 | `TRACE` / `TRACE_CLEAR` | ring buffer of CCID and APDU activity |
-| `BENCH` | time one signature with the loaded key |
-| `GENERATE_IDENTITY` | new on-device keypair and certificate |
-| `PROVISION_BEGIN` / `PROVISION_COMMIT` | staged identity upload, used by `provision.py` |
-| `ENROLL <n>` / `FINGERPRINT_ERASE` | fingerprint template management |
-| `FINGERPRINT_INFO` | module serial, firmware, manufacturer, sensor name |
+| `FINGERPRINT_PROBE` | re-run the link probe and report what answered |
+| `FINGERPRINT_INFO` | model, firmware, manufacturer, sensor name |
+| `FINGERPRINT_SN` | the module's per-die serial — what binding is against |
 | `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
-| `PAIRING_MODE` / `PAIRING_MODE_OFF` | sign without a finger, for pairing flows |
+| `OTP_STATUS` / `OTP_PROVISION` | the device secret; provisioning is irreversible and one-shot |
 | `AID_MODE standard\|pinpad` | force the AID mode instead of letting the probe decide |
 | `BOOTLOADER` | reboot to USB mass-storage bootloader |
 | `REBOOT`, `USB_RECONNECT` | as named |
-| `CONFIG_UNLOCK` | required before destructive commands |
+| `CONFIG_UNLOCK` | required before `BOOTLOADER` |
+
+**Everything here reads or reboots.** Nothing on this console loads a key,
+enrols a finger, erases a template or waives the presence check — those either
+moved to a physical gesture or stopped existing. What is left cannot be turned
+into an attack by a host that owns the Mac, which is the point: the console is
+on the same cable as the card.
 
 `TRACE` is the most useful debugging tool here; it is the witness that settled
 most of the behaviour documented below.
@@ -532,7 +533,7 @@ stays that way until something clears it — hence the boot-time clear.
 
 ### Use P-256, not RSA-2048
 
-| `BENCH` signing | measured |
+| signing | measured |
 | --- | ---: |
 | P-256 on RP2350 | **196 ms** |
 | P-256 on RP2040, for comparison | 469 ms |
@@ -542,7 +543,6 @@ stays that way until something clears it — hence the boot-time clear.
 | --- | ---: |
 | touch to authenticated, pinpad | ~210 ms |
 | APDU transfers for the challenge | 1 (2 chained for RSA) |
-| compiled identity (`secrets.h`) | 3.4 kB P-256, 6.2 kB RSA |
 
 RSA is slow because there is no big-integer accelerator. Signing also runs
 synchronously inside the CCID transfer callback, so USB stalls for the whole
@@ -560,17 +560,17 @@ signing path entirely.
 
 ### EC keys must use named-curve encoding
 
-LibreSSL's `openssl req -newkey ec` writes **explicit** EC parameters by default
-— field type, prime, generator, the lot — and mbedTLS rejects that with
-`MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE` (`-0x4E80`) unless
-`MBEDTLS_PK_PARSE_EC_EXTENDED` is enabled.
+`MBEDTLS_PK_PARSE_EC_EXTENDED` is deliberately not enabled, so mbedTLS accepts
+only named-curve EC keys and rejects explicit parameters — field type, prime,
+generator, the lot — with `MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE` (`-0x4E80`).
 
-`./provision.py` passes `-pkeyopt ec_param_enc:named_curve`, which is what real
-PIV cards carry and shrinks the key from 377 to 135 bytes.
-
-The failure mode is confusing: the certificate decodes, the card enumerates,
-macOS reads the identity, and only signing fails. `STATUS` reports `alg=` and
-`keyrc=` so this is one command away from a diagnosis.
+That costs nothing now: `mbedtls_pk_write_key_pem()` in `identity.c` writes
+named-curve, which is also what real PIV cards carry and is 135 bytes against
+377. It cost a day when keys still came from the host, because LibreSSL's
+`openssl req -newkey ec` writes explicit parameters by default and the failure
+mode is confusing — the certificate decodes, the card enumerates, macOS reads
+the identity, and only signing fails. `STATUS` reports `alg=` and `keyrc=`, so
+if it ever recurs it is one command away from a diagnosis.
 
 ### Omitting `MBEDTLS_PEM_PARSE_C` fails the same way
 
@@ -842,7 +842,7 @@ src/                   device firmware, RP2350 family
   usb_hid.c            HID keyboard, for typing the PIN in standard mode
   config_console.c     provisioning and diagnostics on CDC
   trace.c              ring buffer of CCID and APDU activity
-provision.py           key generation, provisioning, macOS pairing
+provision.py           console client: status, events, macOS pairing
 ```
 
 The macOS driver and the site are in
