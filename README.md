@@ -480,34 +480,19 @@ behaviour on a Mac that has the driver means uninstalling it.
 
 ### Pinpad mode
 
-```
-TRACE 35951 APDU ins=a4 sw=9000              driver selects the private AID
-TRACE 35951 APDU ins=87 p1=11 p2=9a sw=6982  sign attempted, authentication needed
-TRACE 35957 CCID 69 Secure x1                PC_to_RDR_Secure: the pinpad request
-TRACE 39362 EVENT BUTTON                     presence
-TRACE 39831 APDU ins=87 p1=11 p2=9a sw=9000  signed, 469 ms later
-```
+The driver selects the private AID, attempts a signature and is refused with
+`6982`; that refusal is what makes CryptoTokenKit call `beginAuth`, which sends
+`PC_to_RDR_Secure`. The card holds the request open until a finger matches, then
+signs.
 
-Both transcripts here are the originals, captured on the RP2040 development
-build where presence came from a button — hence `EVENT BUTTON` and the 469 ms
-signature. They are kept as taken rather than restaged: the exchange either side
-of the presence event is what they were recorded to show, and that has not
-changed. On a current unit the same sequence reads `EVENT FINGER`, and signing
-is 196 ms.
-
-No `ins=20` VERIFY: no PIN is typed or transmitted. The `6982` is what makes
-CryptoTokenKit call `beginAuth`, and `CCID 69` is the secure-PIN request that
-identifies our driver.
+There is no `ins=20` VERIFY anywhere in it: no PIN is typed or transmitted. The
+`CCID 69` is the secure-PIN request, and only our driver sends one.
 
 ### Standard mode
 
-```
-TRACE 428603 EVENT BUTTON                       presence
-TRACE 428722 APDU ins=20 … sw=9000              VERIFY, the PIN the device typed
-TRACE 429183 APDU ins=87 p1=11 p2=9a sw=9000    signed
-```
-
-580 ms end to end on that build, with nothing installed. macOS labels the prompt
+The order inverts. Nothing asks the card anything until a PIN has been
+submitted, so the match comes first, the device types six digits, `pivtoken`
+sends them as `VERIFY`, and the signature follows. macOS labels the prompt
 *"Certificate For PIV Authentication (…)"*, which is `pivtoken`'s own format.
 
 The PIN is six random digits, generated fresh for each prompt, and is not a
@@ -528,13 +513,9 @@ will do**.
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 
 The asymmetry is inherent. **macOS says nothing to the card until a PIN has
-already been submitted** — measured three times, including an empty trace with a
-prompt on screen for ten seconds:
-
-```
-CCID 62 IccPowerOn
-CCID 63 IccPowerOff      7.5 s later, nothing asked
-```
+already been submitted** — measured three times, including one where a prompt sat
+on screen for ten seconds and the card's whole record of it was a power-on and a
+power-off 7.5 seconds apart, with nothing asked in between.
 
 So in standard mode there is no event to light up on; the device can only
 acknowledge a match after the fact. A sensor that reads a finger without a
@@ -853,7 +834,8 @@ src/                   device firmware, RP2350 family
   identity.c           generates the device's own keypair and certificate
   fingerprint.c        HLK-ZW111 over UART (EF-01), PS_AutoEnroll, module binding
   settings.c           which AID to answer, in its own flash sector
-  storage.c            the PIV identity, in flash, outside the image
+  storage.c            the PIV identity, in flash, encrypted, outside the image
+  otp.c                the device secret that encrypts it, in one-time memory
   usb_ccid.c           CCID class driver over TinyUSB
   usb_hid.c            HID keyboard, for typing the PIN in standard mode
   config_console.c     provisioning and diagnostics on CDC
