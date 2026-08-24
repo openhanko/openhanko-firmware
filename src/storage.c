@@ -42,7 +42,23 @@ typedef struct {
   // the certificate already tells anyone who looks — but the tag covers them, so
   // they cannot be edited without the decrypt failing.
   char blob[STORAGE_SLOT_COUNT][SLOT_CAP];
+  // Pads the record out to whole flash pages.
+  //
+  // Not cosmetic. Flash programs in pages, so a write rounds its length up — and
+  // rounding up a struct that is not a multiple of the page size means the write
+  // reads past the end of it and commits whatever static memory happens to
+  // follow. Here that was `plain`, the buffer holding the *decrypted* keys, so
+  // every commit appended a slice of plaintext to the ciphertext it had just
+  // written. Found by dumping the region and searching it, which is the only way
+  // this is ever found.
+  uint8_t pad[FLASH_PAGE_SIZE -
+              ((4 + 4 * STORAGE_SLOT_COUNT + STORAGE_NONCE_LEN + STORAGE_TAG_LEN + 4 +
+                STORAGE_SLOT_COUNT * SLOT_CAP) % FLASH_PAGE_SIZE)];
 } storage_record_t;
+
+_Static_assert(sizeof(storage_record_t) % FLASH_PAGE_SIZE == 0,
+               "the record must be a whole number of flash pages, or committing "
+               "it writes adjacent memory to flash");
 
 _Static_assert(sizeof(storage_record_t) <= STORAGE_REGION_SIZE,
                "storage record must fit the reserved region");
@@ -241,7 +257,9 @@ bool storage_stage_commit(void) {
 
   // Flash writes must be a multiple of the page size, and nothing may execute
   // from flash while the operation runs.
-  size_t span = (sizeof(staged) + FLASH_PAGE_SIZE - 1) & ~(size_t)(FLASH_PAGE_SIZE - 1);
+  // Exactly the struct now that it is page-sized; no rounding, so nothing
+  // outside it is read.
+  size_t span = sizeof(staged);
 
   uint32_t interrupts = save_and_disable_interrupts();
   flash_range_erase(STORAGE_FLASH_OFFSET, STORAGE_REGION_SIZE);
