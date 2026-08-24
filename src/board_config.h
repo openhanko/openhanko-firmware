@@ -61,11 +61,11 @@
 
 // HLK-ZW111 fingerprint module on UART1.
 //
-// GP4/GP5 are UART1's default pins and clear of the WS2812 on GP16 and the
-// button on GP10. Set FINGERPRINT_UART_TX to -1 to build without sensor
-// support at all; leaving it configured on a board with nothing attached is
-// also fine, since the module is detected at startup and its absence simply
-// leaves the button as the trigger.
+// GP4/GP5 are UART1's default pins and clear of the button on GP12. Set
+// FINGERPRINT_UART_TX to -1 to build without sensor support at all — which
+// yields a device that cannot authenticate anything, since a match is the only
+// thing that authorises a signature. The module is detected at startup, so a
+// configured pin with nothing attached is not an error, just an inert card.
 // These name the MCU's own pins, not the module's, and the two cross over.
 // GP4 is UART1 TX in silicon — an output — so it drives the module's RX input;
 // GP5 is UART1 RX and listens to the module's TX output. Wiring TX to TX gives
@@ -113,17 +113,19 @@
 // authenticating with the sensor otherwise responding.
 #define FINGERPRINT_REQUIRE_TOUCH 1
 
-// Addressable RGB indicator (WS2812) on GP16. Driven by PIO, since the protocol
-// needs sub-microsecond pulse widths the CPU cannot hit reliably alongside USB.
-// Set to -1 to disable.
+// Optional discrete indicator, and -1 on the production board.
 //
-// It breathes only while the reader is waiting for a press. With pinpad PIN
-// entry macOS shows no prompt at all, so without this the device gives the user
-// nothing to react to.
-// -1 on the production board, which has no discrete LED: the fingerprint
-// module's own ring is the entire indicator, and anything on the PCB would be
-// inside a sealed case where nobody can see it. status_led.c compiles to
-// no-ops, and every indication goes through mirror_light() to the ring.
+// A sealed case has nowhere to put one where anybody could see it, so the
+// fingerprint module's own ring is the entire indicator: status_led.c compiles
+// to no-ops and every indication goes through mirror_light() to the ring. That
+// is the better arrangement anyway — the light the user reacts to sits on the
+// surface they touch.
+//
+// Set to a GPIO to drive an addressable RGB LED there instead, as the
+// development boards did. It is a WS2812, driven by PIO because the protocol
+// needs sub-microsecond pulse widths the CPU cannot hit reliably alongside USB,
+// and it latches its last value, so status_led_init() clears it at boot rather
+// than inheriting whatever earlier firmware left lit.
 #ifndef STATUS_LED_GPIO
 #define STATUS_LED_GPIO -1
 #endif

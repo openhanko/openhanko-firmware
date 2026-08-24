@@ -33,75 +33,6 @@ boot and debug lockout are all working on hardware. What is left:
   worth. [THREAT-MODEL.md](THREAT-MODEL.md) says how far that goes.
 - The custom RP2354A boards are at fab; development is on an RP2350-Zero.
 
-## Compared with tinyTouch
-
-This project exists because tinyTouch did the hard part first: a working PIV
-applet and CCID transport on a microcontroller, with command chaining, `GET
-RESPONSE` chunking and a correct class descriptor. That layer is still
-substantially upstream's, and the differences below are what happened when the
-same idea was pointed at a different problem — a device you hand to somebody
-else, rather than one you build for yourself.
-
-Measured against `firmware/tiny_touch_smartcard` as of August 2026.
-
-| | tinyTouch | OpenHanko |
-| --- | --- | --- |
-| MCU | ESP32-S3 | RP2354A — RP2350 with in-package flash |
-| signing algorithms | RSA-2048 only — the sign path returns `6f00` for any key that is not RSA, and `GENERAL AUTHENTICATE` rejects any `P1` but `0x07` | P-256 (`0x11`) and RSA-2048 (`0x07`), checked against the key actually loaded |
-| signature time | — | 196 ms P-256 on an RP2350 |
-| ECDSA nonce | n/a | RFC 6979 deterministic |
-| where the key comes from | provisioned from a host, or compiled into the image | **generated on the device at first boot**; both host paths kept as alternatives |
-| does the private key exist off-device | yes — on whatever machine generated it | no, on the generate-on-device path |
-| slot 9D key agreement | not implemented | ECDH P-256, dynamic auth tag `0x85` |
-| pinpad PIN entry | not implemented | `bPINSupport` declared and `PC_to_RDR_Secure` answered from a fingerprint |
-| AIDs answered | standard PIV only | standard PIV **and** a private AID |
-| driver detection | none | private-AID probe: the device works out for itself whether its driver is installed, and switches mode both ways |
-| host software | Python LaunchAgent, AES/HMAC over HID | signed and notarised CryptoTokenKit extension |
-| factory reset without a host | no | button held through power-up, release commits |
-| on-device diagnostics | `STATUS` | `STATUS`, plus a `TRACE` ring buffer of CCID and APDU activity |
-| fingerprint sensor | ZW101 | ZW111, bound to the device by its per-die serial |
-| key material at rest | plaintext in NVS | AES-256-GCM under a secret in OTP |
-| secure boot | none | signed images, two keys with revocation |
-
-### What upstream has that this does not
-
-- **A real password channel.** `touch_pin_hid.c` is 248 lines of AES/HMAC keyed
-  to the host helper, so the device can type an actual password rather than a
-  fixed dummy PIN. Dropped here entirely — the CryptoTokenKit route made it
-  unnecessary for everything except `sudo`.
-- **Dual device modes.** `device_config.c` lets one device be a PIV card *or* an
-  HID password typer, selectable at runtime. This is PIV only.
-
-### Where the differences actually matter
-
-**Key custody.** Upstream's key is made on a host and pushed to the device, so
-whoever provisioned it could have kept a copy. That is fine when you provision
-your own. It stops being fine the moment somebody else assembles the device, and
-no amount of assurance fixes it — the question simply should not be askable.
-Generating on the device removes it: the private key has no representation
-outside the chip at any point. That single change is most of why the rest of this
-list exists.
-
-**Driverless and pinpad from one image.** Upstream answers the standard PIV AID,
-so Apple's `pivtoken` binds and the device types a PIN over HID into whatever has
-focus. That works with nothing installed, which is genuinely the right default.
-But it caps the experience there: HID typing cannot be better than the focused
-window, and macOS frequently does not focus its own authorization dialog. Adding
-a private AID as a *probe* gets both — untouched Mac, `pivtoken` binds, PIN typed;
-driver present, our extension binds and a finger alone signs with no dialog at
-all. Neither mode needs the user to choose.
-
-**P-256 was forced, then turned out to matter.** The ESP32-S3 has a big-integer
-accelerator, so upstream never paid for RSA-2048. The Cortex-M0+ has no 64-bit
-multiply, and the same signature costs 2924 ms — long enough that the device
-reads as broken. P-256 brings it to 469 ms. The security consequence came after:
-a weak RNG is survivable for RSA blinding and fatal for an ECDSA nonce, which is
-why signing here is RFC 6979 deterministic and why the RP2350's TRNG is the
-reason to move parts at all.
-
-None of this is a criticism of upstream, which is explicit about being a proof of
-concept and is a good one.
-
 ## Hardware
 
 **RP2354A** — an RP2350 die with 2 MB of flash stacked in the same package —
@@ -514,6 +445,10 @@ will do**.
 
 ## Indicator
 
+The fingerprint module's own ring, driven over the same UART that carries
+matches. There is no separate LED — see [pinout](#pinout) — which means the
+light the user is asked to react to is on the surface they are asked to touch.
+
 | mode | behaviour |
 | --- | --- |
 | pinpad | **breathes** while waiting — macOS shows no prompt, so this is the entire invitation |
@@ -528,9 +463,6 @@ So in standard mode there is no event to light up on; the device can only
 acknowledge a match after the fact. A sensor that reads a finger without a
 flicker looks broken, especially when the PIN it typed lands in a window the
 user is not looking at.
-
-A WS2812 latches its last value, so a board left glaring by earlier firmware
-stays that way until something clears it — hence the boot-time clear.
 
 ## Implementation notes
 
@@ -854,9 +786,86 @@ openhanko-web.
 
 ## Next steps
 
-1. **Wire a ZW111 and test `fingerprint.c`.** The search range and the LED
-   parameters are the two things most likely to need adjusting.
-2. **Port to RP2350** and regenerate every identity there.
-3. **Burn OTP and lock debug**, last, on a unit you can afford to brick. This is
-   the step that turns the fingerprint from a convenience into a security
-   property.
+The device works and is provisioned; what is left is written up as gaps rather
+than features, in [THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered). Shortest
+version:
+
+1. **A real PIN, mixed into the wrapping KDF.** The only thing that would make a
+   stolen device inert, and the only defence left against someone holding it. It
+   was blocked on encryption at rest, which is done, so it is now buildable.
+2. **Rate-limit signatures**, and consider making a match authorise one
+   operation rather than a window.
+3. **Gate `CONFIG_UNLOCK` on a fingerprint** rather than a button press, keeping
+   the blank-device exemption so a fresh unit can still be set up.
+
+Not firmware, but on the same list: the RP2354A boards are at fab, and neither
+public repository has a LICENSE file yet.
+
+## Compared with tinyTouch
+
+This project exists because tinyTouch did the hard part first: a working PIV
+applet and CCID transport on a microcontroller, with command chaining, `GET
+RESPONSE` chunking and a correct class descriptor. That layer is still
+substantially upstream's, and the differences below are what happened when the
+same idea was pointed at a different problem — a device you hand to somebody
+else, rather than one you build for yourself.
+
+Measured against `firmware/tiny_touch_smartcard` as of August 2026.
+
+| | tinyTouch | OpenHanko |
+| --- | --- | --- |
+| MCU | ESP32-S3 | RP2354A — RP2350 with in-package flash |
+| signing algorithms | RSA-2048 only — the sign path returns `6f00` for any key that is not RSA, and `GENERAL AUTHENTICATE` rejects any `P1` but `0x07` | P-256 (`0x11`) and RSA-2048 (`0x07`), checked against the key actually loaded |
+| signature time | — | 196 ms P-256 on an RP2350 |
+| ECDSA nonce | n/a | RFC 6979 deterministic |
+| where the key comes from | provisioned from a host, or compiled into the image | **generated on the device at first boot**; both host paths kept as alternatives |
+| does the private key exist off-device | yes — on whatever machine generated it | no, on the generate-on-device path |
+| slot 9D key agreement | not implemented | ECDH P-256, dynamic auth tag `0x85` |
+| pinpad PIN entry | not implemented | `bPINSupport` declared and `PC_to_RDR_Secure` answered from a fingerprint |
+| AIDs answered | standard PIV only | standard PIV **and** a private AID |
+| driver detection | none | private-AID probe: the device works out for itself whether its driver is installed, and switches mode both ways |
+| host software | Python LaunchAgent, AES/HMAC over HID | signed and notarised CryptoTokenKit extension |
+| factory reset without a host | no | button held through power-up, release commits |
+| on-device diagnostics | `STATUS` | `STATUS`, plus a `TRACE` ring buffer of CCID and APDU activity |
+| fingerprint sensor | ZW101 | ZW111, bound to the device by its per-die serial |
+| key material at rest | plaintext in NVS | AES-256-GCM under a secret in OTP |
+| secure boot | none | signed images, two keys with revocation |
+
+### What upstream has that this does not
+
+- **A real password channel.** `touch_pin_hid.c` is 248 lines of AES/HMAC keyed
+  to the host helper, so the device can type an actual password rather than a
+  fixed dummy PIN. Dropped here entirely — the CryptoTokenKit route made it
+  unnecessary for everything except `sudo`.
+- **Dual device modes.** `device_config.c` lets one device be a PIV card *or* an
+  HID password typer, selectable at runtime. This is PIV only.
+
+### Where the differences actually matter
+
+**Key custody.** Upstream's key is made on a host and pushed to the device, so
+whoever provisioned it could have kept a copy. That is fine when you provision
+your own. It stops being fine the moment somebody else assembles the device, and
+no amount of assurance fixes it — the question simply should not be askable.
+Generating on the device removes it: the private key has no representation
+outside the chip at any point. That single change is most of why the rest of this
+list exists.
+
+**Driverless and pinpad from one image.** Upstream answers the standard PIV AID,
+so Apple's `pivtoken` binds and the device types a PIN over HID into whatever has
+focus. That works with nothing installed, which is genuinely the right default.
+But it caps the experience there: HID typing cannot be better than the focused
+window, and macOS frequently does not focus its own authorization dialog. Adding
+a private AID as a *probe* gets both — untouched Mac, `pivtoken` binds, PIN typed;
+driver present, our extension binds and a finger alone signs with no dialog at
+all. Neither mode needs the user to choose.
+
+**P-256 was forced, then turned out to matter.** The ESP32-S3 has a big-integer
+accelerator, so upstream never paid for RSA-2048. The Cortex-M0+ has no 64-bit
+multiply, and the same signature costs 2924 ms — long enough that the device
+reads as broken. P-256 brings it to 469 ms. The security consequence came after:
+a weak RNG is survivable for RSA blinding and fatal for an ECDSA nonce, which is
+why signing here is RFC 6979 deterministic and why the RP2350's TRNG is the
+reason to move parts at all.
+
+None of this is a criticism of upstream, which is explicit about being a proof of
+concept and is a good one.
