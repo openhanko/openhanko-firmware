@@ -26,8 +26,8 @@ a host.
 The sensor, the enrolment gesture, module binding, encryption at rest, secure
 boot and debug lockout are all working on hardware. What is left:
 
-- `CONFIG_UNLOCK` still opens its window on a button press rather than a
-  fingerprint, and that window includes `PAIRING_MODE` — see
+- `PAIRING_MODE` still signs without a fingerprint, and `CONFIG_UNLOCK` still
+  opens on a button press — see
   [the button does not authenticate](#the-button-does-not-authenticate).
 - There is no real PIN, so a stolen device is worth what its credentials are
   worth. [THREAT-MODEL.md](THREAT-MODEL.md) says how far that goes.
@@ -280,11 +280,10 @@ is to restore press-to-authenticate is a switch someone eventually ships.
 Removing the sensor from a unit now yields a device that cannot authenticate at
 all, which is the correct failure.
 
-**The console unlock is the loose end.** `CONFIG_UNLOCK` waits on the button
-rather than on a match, and the 120-second window it opens includes
-`PAIRING_MODE`, which makes slot 9A sign on demand. So there is one route to a
-signature that a press alone reaches — over CDC, from a host, with somebody
-standing at the device. It is tracked as the first item in
+**`PAIRING_MODE` is the loose end.** It waives the presence requirement on both
+9A and 9D for 120 seconds, and it asks for a button press directly rather than
+going through `CONFIG_UNLOCK`. So there is one route to a signature that a press
+alone reaches, over CDC, from a host. It is tracked as the first item in
 [THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered) rather than described as
 something the design intends.
 

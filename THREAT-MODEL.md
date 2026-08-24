@@ -89,21 +89,25 @@ Verified in `src/piv.c`:
 | `VERIFY` | any bytes — the PIN is discarded (`(void)data;`), always `9000`, 60 s window | nothing |
 | `GENERAL AUTHENTICATE` **slot 9D** (ECDH) | a fingerprint match inside a 60 s session window, not consumed on use | an enrolled finger |
 | `GENERAL AUTHENTICATE` **slot 9A** (sign) | a fingerprint match inside a 10 s window | an enrolled finger, which the user presents |
-| `CONFIG_UNLOCK`, then `PAIRING_MODE` | **a button press**, then 9A signs freely for 120 s | **one press of an external button** |
-| console config commands | the same unlock window | the same press |
+| `PAIRING_MODE` | **a button press** — not even `CONFIG_UNLOCK` first; then 9A *and* 9D sign freely for 120 s | **one press of an external button** |
+| `CONFIG_UNLOCK`, then console config commands | a button press, then a 120 s window | one press |
 | factory reset | button held through power-up; **no host path at all** | — |
 
 There is no PIN retry counter and no lockout, because there is no PIN to count
 against. `VERIFY` returns `9000` rather than the `63CX` retries-remaining a
 standard PIV card returns.
 
-**The console unlock is the exception to fingerprint-only, and it is a real
-one.** `CONFIG_UNLOCK` in `config_console.c` waits on `button_pressed()`, not on
-a match. On a sealed unit the button is on the outside and the CDC console is on
-the same cable as the card, so a host with a person beside it gets 120 seconds
-in which `PAIRING_MODE` makes 9A sign on demand — the exact capability the
-fingerprint exists to gate, reached without one. It is not the factory-reset or
-enrolment role the button is documented as having. Listed in section 8.
+**`PAIRING_MODE` is the exception to fingerprint-only, and it is a real one.**
+It calls `demand_button_press()` directly — it does not even sit behind
+`CONFIG_UNLOCK` — and what it grants is 120 seconds in which both 9A and 9D sign
+on demand. On a sealed unit that button is on the outside and the CDC console
+shares a cable with the card, so the exact capability the fingerprint exists to
+gate is reachable with one press and no finger.
+
+Its stated purpose is to let `sc_auth pair` finish unattended, which appears not
+to be a requirement that exists: pairing binds a public-key hash read from the
+certificate, and nothing in that path asks the card to sign. Listed in section 8
+as something to delete rather than to re-gate.
 
 Slot 9D used to be the sharpest edge: ungated entirely, so a compromised host
 could run key agreement against it silently and at will. It is now gated on a
@@ -195,10 +199,12 @@ per session, then touch — not a flag flip.
 
 ## 8. Gaps, ordered
 
-1. **`CONFIG_UNLOCK` is gated on the button, not a fingerprint.** The one path
-   that reaches signing without a match, and the button is on the outside of the
-   case. Closing it means demanding a match there instead, with the existing
-   blank-device exemption kept so first-time provisioning still works.
+1. **`PAIRING_MODE` signs without a fingerprint.** One button press buys 120
+   seconds of free signing on 9A and 9D, from a host, over CDC. It dates from
+   bring-up, it has one caller, and the requirement it waives does not appear to
+   exist — so the fix is to remove the command, not to re-gate it. `CONFIG_UNLOCK`
+   is gated on the button too, but what it opens is configuration; demanding a
+   match there instead is the smaller follow-up.
 2. **No real PIN.** The remaining defence against attacker C, who holds the
    device and can drive the sensor link. The at-rest work it depended on is
    done, so this is now buildable rather than blocked.
