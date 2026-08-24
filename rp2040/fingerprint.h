@@ -92,6 +92,15 @@ bool fingerprint_verify(uint16_t *slot, uint16_t *score);
 // `timeout_ms`, pumping USB throughout.
 bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms);
 
+// PS_AutoEnroll. The module runs the whole sequence and enforces its own rules:
+// it refuses a finger already enrolled, and refuses to overwrite an occupied
+// slot. `entries` is how many impressions it asks for.
+bool fingerprint_auto_enroll(uint16_t slot, uint8_t entries, uint32_t timeout_ms);
+
+// The confirmation code the last enrolment ended on, so a caller can tell
+// "already enrolled" from a genuine failure.
+uint8_t fingerprint_last_enroll_cc(void);
+
 // Erases every template. The fingerprint half of a factory reset.
 bool fingerprint_erase_all(void);
 

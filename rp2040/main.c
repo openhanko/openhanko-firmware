@@ -208,8 +208,15 @@ static bool enroll_owns_ring;
 //
 // Only on change: every call is a UART exchange, and repainting a steady light
 // sixty times a second would flood the link the sensor also answers on.
+// Forces the next mirror_light() to repaint even if the mode has not changed.
+// The module drives its own ring during a rejected match, so our idea of what is
+// showing can be wrong without the indicator state having moved.
+static bool mirror_light_stale;
+static void mirror_light_invalidate(void) { mirror_light_stale = true; }
+
 static void mirror_light(status_led_mode_t mode) {
   static status_led_mode_t shown = (status_led_mode_t)-1;
+  if (mirror_light_stale) { mirror_light_stale = false; shown = (status_led_mode_t)-1; }
   if (enroll_owns_ring) {
     // Force a repaint when enrollment gives the ring back, or the indicator
     // would sit in whatever colour enrollment left behind.
@@ -240,6 +247,19 @@ static void mirror_light(status_led_mode_t mode) {
 // their own finger to a working device and walk away with a credential that
 // answers to them.
 
+// How many fingers a device insists on before it considers itself set up.
+//
+// Two, because there is no fallback: the button does not authenticate, so a
+// failed sensor or an unavailable finger leaves factory reset as the only route,
+// and that destroys the key. Two fingers from different hands is the cheapest
+// insurance there is. Set to 1 to allow a single finger.
+#define ENROLL_MINIMUM 2
+
+// Impressions per finger. Two is the floor for a template that matches
+// reliably; the module's self-learning improves it with use. One captures a
+// single finger position and shows up later as intermittent non-recognition.
+#define ENROLL_IMPRESSIONS 2
+
 #define ENROLL_ARM_MS     30000   // to present the new finger
 #define ENROLL_CAPTURE_MS 20000   // to complete the impressions once started
 #define ENROLL_SETTLE_MS  1200    // how long the result stays lit
@@ -264,6 +284,9 @@ static void enroll_open(const char *why) {
 
 static void enroll_finish(bool ok) {
   config_console_send_line(ok ? "EVENT ENROLL_OK" : "EVENT ENROLL_FAILED");
+  // The module has been driving the ring during the enrolment itself, so this
+  // is where the indicator comes back to us — steady, briefly, and then either
+  // re-armed or dark.
   fingerprint_light(FP_LIGHT_STEADY, ok ? FP_LED_GREEN : FP_LED_RED, 0);
   enroll_state = ENROLL_SETTLE;
   enroll_deadline = now_ms() + ENROLL_SETTLE_MS;
@@ -309,8 +332,8 @@ static void poll_enrollment(void) {
     enroll_owns_ring = false;
     // A device with no finger enrolled is inert, so keep asking rather than
     // going dark and leaving the user with nothing to act on.
-    if (fingerprint_present() && fingerprint_template_count() == 0) {
-      enroll_open("still no finger enrolled");
+    if (fingerprint_present() && fingerprint_template_count() < ENROLL_MINIMUM) {
+      enroll_open("fewer fingers enrolled than the minimum");
     }
     return;
   }
@@ -347,7 +370,7 @@ static void poll_enrollment(void) {
   // sensor, so the wait is the enrollment itself rather than the user finding
   // the device. Worth making properly incremental once there is hardware to
   // test the state machine against.
-  enroll_finish(fingerprint_enroll(slot, ENROLL_CAPTURE_MS));
+  enroll_finish(fingerprint_auto_enroll(slot, ENROLL_IMPRESSIONS, ENROLL_CAPTURE_MS));
 }
 
 // A recognised fingerprint authorises exactly what a button press does.
@@ -369,7 +392,14 @@ static void poll_fingerprint(void) {
   last_poll = now_ms();
 
   uint16_t slot = 0, score = 0;
-  if (!fingerprint_verify(&slot, &score)) return;
+  if (!fingerprint_verify(&slot, &score)) {
+    // The module lights its own ring on a rejected match and leaves it breathing
+    // afterwards. mirror_light() only writes on a change, so with the indicator
+    // already OFF it saw nothing to do and the ring stayed lit. Invalidate the
+    // cache so the next pass repaints whatever the indicator actually wants.
+    mirror_light_invalidate();
+    return;
+  }
 
   printf("main: fingerprint matched slot %u (score %u)\n", slot, score);
   config_console_send_line("EVENT FINGERPRINT");
@@ -472,8 +502,8 @@ int main(void) {
   // be authorised by possession alone. Doing it at first boot means there is no
   // period during which the device is paired and useful but unenrolled, which
   // is the only period in which appropriating it would be worth anything.
-  if (fingerprint_present() && fingerprint_template_count() == 0) {
-    enroll_open("first boot, no finger enrolled");
+  if (fingerprint_present() && fingerprint_template_count() < ENROLL_MINIMUM) {
+    enroll_open("fewer fingers enrolled than the minimum");
   }
 
   // No RTOS. Everything runs here: USB, the console, and the button. The only
@@ -492,6 +522,20 @@ int main(void) {
     // impressions stolen by the authentication poll.
     if (enroll_state == ENROLL_IDLE) poll_fingerprint();
     poll_enrollment();
+
+    if (usb_ccid_pin_pending() && fingerprint_present() &&
+        fingerprint_template_count() == 0) {
+      // macOS offers to pair the moment the card is inserted, which on a device
+      // straight out of the box is before any finger exists. Nothing can satisfy
+      // that request — the button does not authenticate and there is no template
+      // to match — so refuse it rather than leave a prompt on screen waiting for
+      // something that cannot happen. The ring stays purple, still asking for
+      // the thing the device actually needs.
+      printf("main: refusing pinpad request, no finger enrolled yet\n");
+      config_console_send_line("EVENT PINPAD_NO_TEMPLATE");
+      usb_ccid_pin_complete(false);
+      continue;
+    }
 
     if (usb_ccid_pin_pending()) {
       // The host is waiting on a pinpad PIN entry. Either the user presses now,

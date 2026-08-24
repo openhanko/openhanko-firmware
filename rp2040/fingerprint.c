@@ -39,6 +39,26 @@
 // PS_GetChipSN: 32 bytes, unique per die.
 #define INS_CHIP_SERIAL     0x34
 #define INS_HANDSHAKE       0x35
+#define INS_AUTO_ENROLL     0x31
+
+// PS_AutoEnroll flags. Bit 2 is left clear on purpose: it asks the module to
+// report progress at each step, which is what drives the ring during enrolment.
+#define AUTO_ENROLL_FLAGS ( (1u << 0)   /* backlight off once the image is taken */ \
+                          | (1u << 1)   /* image preprocessing on */               \
+                          | (1u << 4) ) /* refuse a finger already enrolled */
+
+// Progress stages reported in parameter 1.
+#define STAGE_GET_IMAGE   0x01
+#define STAGE_FEATURE     0x02
+#define STAGE_FINGER_AWAY 0x03
+#define STAGE_MERGE       0x04
+#define STAGE_STORE       0x06
+
+// Confirmation codes worth naming from the auto-enrolment stream.
+#define CC_ALREADY_EXISTS 0x27
+#define CC_NOT_EMPTY      0x22
+#define CC_DB_FULL        0x1f
+#define CC_TIMEOUT        0x26
 #define INS_TEMPLATE_COUNT  0x1d
 #define INS_AURA_LED        0x3c
 #define INS_READ_INFO_PAGE  0x16
@@ -160,6 +180,9 @@ bool fingerprint_touch_wired(void) {
 
 bool fingerprint_touch_asserted(void) { return touch_line_asserted(); }
 static uint16_t template_count;
+// Why the last enrolment ended, so the console can say something better than
+// "failed": "that finger is already enrolled" is a different user action.
+static uint8_t last_enroll_cc;
 
 static uint32_t now_ms(void) {
   return to_ms_since_boot(get_absolute_time());
@@ -371,6 +394,8 @@ bool fingerprint_present(void) {
   return module_present;
 }
 
+uint8_t fingerprint_last_enroll_cc(void) { return last_enroll_cc; }
+
 uint16_t fingerprint_template_count(void) {
   return template_count;
 }
@@ -517,6 +542,75 @@ bool fingerprint_verify(uint16_t *slot, uint16_t *score) {
   return true;
 }
 
+// PS_AutoEnroll: the module runs the whole sequence — capture, features, merge,
+// store — and reports progress as a stream of acknowledgements.
+//
+// Better than driving those steps by hand, for reasons about correctness rather
+// than tidiness. The impression count becomes a parameter instead of being
+// implied by a loop; and the module enforces what the steps mean, refusing a
+// finger that is already enrolled and refusing to overwrite an occupied slot,
+// neither of which the hand-driven sequence checked.
+bool fingerprint_auto_enroll(uint16_t slot, uint8_t entries, uint32_t timeout_ms) {
+  if (!module_present) return false;
+  uint32_t deadline = now_ms() + timeout_ms;
+
+  uint8_t params[5] = {
+    (uint8_t)(slot >> 8), (uint8_t)(slot & 0xff),
+    entries,
+    (uint8_t)(AUTO_ENROLL_FLAGS >> 8), (uint8_t)(AUTO_ENROLL_FLAGS & 0xff),
+  };
+  send_command(INS_AUTO_ENROLL, params, sizeof(params));
+
+  uint8_t last_entry = 0;
+  for (;;) {
+    if ((int32_t)(now_ms() - deadline) >= 0) {
+      printf("fingerprint: auto-enrolment timed out\n");
+      last_enroll_cc = CC_TIMEOUT;
+      goto failed;
+    }
+
+    uint8_t payload[4];
+    uint8_t payload_len = 0;
+    // A long per-packet timeout: between impressions the module is waiting on a
+    // person, and silence there is not an error.
+    uint8_t cc = read_ack(payload, sizeof(payload), &payload_len, 3000);
+    if (cc == 0xff) continue;      // nothing yet; the user is still deciding
+    if (cc == 0xfe) goto failed;   // a mangled packet is a real fault
+    if (cc != CC_OK) {
+      const char *why = cc == CC_ALREADY_EXISTS ? "this finger is already enrolled"
+                      : cc == CC_NOT_EMPTY     ? "that slot is occupied"
+                      : cc == CC_DB_FULL       ? "the template store is full"
+                      : cc == CC_TIMEOUT       ? "the module timed out waiting"
+                                               : "refused";
+      printf("fingerprint: auto-enrolment failed, cc=%02x (%s)\n", cc, why);
+      last_enroll_cc = cc;
+      goto failed;
+    }
+    if (payload_len < 2) continue;
+
+    // The ring is deliberately left alone here. The module lights it itself
+    // during auto-enrolment — steady green for an impression taken, blue while
+    // it waits for the finger to lift, red on a rejection — and sending our own
+    // commands on top produced two schemes fighting over one indicator, which
+    // looked like the module misbehaving. It has better information about what
+    // it is doing than we do, so during this command it owns the light.
+    uint8_t stage = payload[0], detail = payload[1];
+    (void)detail;
+    if (stage == STAGE_STORE) {
+      template_count++;
+      last_enroll_cc = CC_OK;
+      printf("fingerprint: auto-enrolled slot %u\n", slot);
+      return true;
+    }
+    last_entry = stage;
+  }
+
+failed:
+  // Also not lit here: the module has already shown its own rejection, and
+  // adding ours on top is what made a refusal look like a fault.
+  return false;
+}
+
 bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) {
   if (!module_present) return false;
   uint32_t deadline = now_ms() + timeout_ms;
@@ -525,7 +619,12 @@ bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) {
   // politeness: without it the module merges two captures of an identical
   // placement and builds a template that only matches that exact position.
   for (uint8_t pass = 1; pass <= 2; pass++) {
-    fingerprint_light(FP_LIGHT_BREATHE, pass == 1 ? FP_LED_BLUE : FP_LED_PURPLE, 0);
+    // The same colour for both impressions, deliberately. This used to breathe
+    // blue then purple and flash green after each, which reads as "finger
+    // accepted, now the next one" — and a user who obliges presents a second
+    // finger, which PS_RegModel merges with the first into a single template of
+    // two unrelated prints. One enrolment is one finger, presented twice.
+    fingerprint_light(FP_LIGHT_BREATHE, FP_LED_PURPLE, 0);
 
     // Wait for a finger.
     while (exchange(INS_GET_IMAGE, NULL, 0, NULL, 0, NULL, 300) != CC_OK) {
@@ -535,7 +634,11 @@ bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) {
     if (exchange(INS_IMAGE_TO_BUFFER, &pass, 1, NULL, 0, NULL, 1000) != CC_OK) {
       goto failed;
     }
-    fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 2);
+    // A single short flash for "got that one", against three at the end for
+    // "done". Same colour, different count: the completion has to be
+    // distinguishable from the halfway point without a second hue implying a
+    // second finger.
+    fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 1);
 
     if (pass == 1) {
       // Wait for the lift.
@@ -689,6 +792,10 @@ const char *fingerprint_status_text(void) { return "absent"; }
 bool fingerprint_touch_wired(void) { return false; }
 bool fingerprint_touch_asserted(void) { return false; }
 bool fingerprint_probe(void) { return false; }
+bool fingerprint_auto_enroll(uint16_t s, uint8_t e, uint32_t t) {
+  (void)s; (void)e; (void)t; return false;
+}
+uint8_t fingerprint_last_enroll_cc(void) { return 0; }
 uint32_t fingerprint_probe_baud(void) { return 0; }
 uint16_t fingerprint_probe_rx_bytes(void) { return 0; }
 uint16_t fingerprint_boot_rx_bytes(void) { return 0; }
