@@ -169,15 +169,15 @@ parameter page. An attacker who opens the case can drive the harness and forge a
 response, and secure boot, SWD lockout and OTP protection all keep working
 correctly — they are not in that path.
 
-**Whether it can be fixed on this module is open.** The manual documents a
-safety instruction set that would turn the link into a challenge-response, but
-also says those functions are unsupported at `SecurLevel 0`, which is where the
-module sits — and this firmware answers them with the same `0x00` it gives an
-opcode that does not exist. Only raising the encryption level decides it, and
-that write cannot be undone.
+**It cannot be fixed on this module.** The manual documents a safety instruction
+set that would turn the link into a challenge-response, and gates it behind an
+encryption level in register 7. That register is inert on this firmware: it
+accepts a Reserved value, accepts a second write to a register documented as
+one-way, and leaves `Secur Level` reading 0 — so the level never changes and the
+safety set answers like the unimplemented opcode it is. See the README.
 
-Either way it is not the measure to plan around. A PIN closes the same attack
-without depending on the module.
+A PIN closes the same attack without depending on the module, and is the only
+measure here that does.
 
 See [the sensor link](README.md#the-sensor-link-cannot-be-authenticated).
 
@@ -195,7 +195,7 @@ Ordered by what they actually close, not by effort.
 | Sensor binding via `PS_GetChipSN` *(done)* | swapping the module for another — the serial is per-die, confirmed across two units | an emulator replaying the expected serial |
 | `TouchOut` correlation *(done)*, staged protocol, timing bounds | replaying one packet on RX | reading the published protocol and driving two lines |
 | **PIN mixed into the wrapping KDF** | **attacker C** — a stolen device is inert, forging a match unwraps nothing | someone who watches the user type the PIN |
-| Authenticated sensor link *(unproven)* | would close the forged match outright | unknown — the module answers the safety set the same way it answers nonsense, and only a one-way write settles it |
+| ~~Authenticated sensor link~~ | would have closed the forged match outright | **unavailable** — register 7 is inert on this module, so the encryption level never changes and the safety set stays unreachable |
 
 Two notes that are easy to get wrong:
 
@@ -212,11 +212,11 @@ per session, then touch — not a flag flip.
 
 ## 8. Gaps, ordered
 
-1. **No real PIN.** The defence against attacker C that does not depend on the
-   sensor: if the link cannot be trusted, the answer it carries has to stop being
-   sufficient on its own. The at-rest work it depended on is done, so this is
-   buildable rather than blocked — and unlike an authenticated link, it is
-   buildable regardless of what the module turns out to support.
+1. **No real PIN.** The *only* remaining defence against attacker C, now that an
+   authenticated sensor link is ruled out on this module: if the link cannot be
+   trusted, the answer it carries has to stop being sufficient on its own. The
+   at-rest work it depended on is done, so this is buildable rather than blocked,
+   and it depends on nothing the sensor does or does not support.
 2. **The firmware is the oracle.** It can read the OTP secret — that is the
    design — so a bug that leaks it costs everything the lockdown bought. A
    standing constraint, not a task: never add anything that returns it.

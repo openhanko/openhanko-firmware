@@ -112,6 +112,15 @@ class Console:
             if chunk:
                 self.buffer += chunk
 
+    def _drain(self, window: float) -> list[str]:
+        """Lines that arrive after a terminator, until the device goes quiet."""
+        trailing: list[str] = []
+        while True:
+            line = self.read_line(window)
+            if line is None:
+                return trailing
+            trailing.append(line)
+
     def send(self, command: str, timeout: float = 20.0, echo: bool = True) -> list[str]:
         """Send one command and collect lines until the OK/ERR terminator."""
         os.write(self.fd, (command + "\n").encode("ascii"))
@@ -128,6 +137,12 @@ class Console:
                 elif line.startswith(("EVENT ", "PROMPT ")):
                     say(f"  · {line}")
             if line.startswith(("OK", "ERR")) or line == "PONG":
+                # Most commands put the terminator last. FINGERPRINT_INFO_RAW
+                # puts it first and follows it with the page, so stopping here
+                # threw away everything that made the command worth running.
+                # Draining afterwards tolerates both orders rather than encoding
+                # which commands are which.
+                lines.extend(self._drain(0.35))
                 break
         if not lines:
             raise Failure(

@@ -743,10 +743,13 @@ bool fingerprint_read_info(fp_info_t *out) {
   // four bytes late: the fields begin at 28, but byte 25 holds a 0x01 that broke
   // the run, so the scan settled on 32 and sliced every string mid-word.
   //
-  // The layout is corroborated at several independent points — the device
-  // address reads 0xFFFFFFFF at 8, the baud coefficient at 14 gives exactly the
-  // rate the module answers on, and the table flag at 126 is the 0x1234 the
-  // manual says marks an initialised table.
+  // The layout is the manual's own parameter list, in its numbered order, as
+  // consecutive 2-byte fields with the 4-byte device address at 8. That gives
+  // six independent anchors rather than a guess: capacity at 4 is the 100 the
+  // module reports, the address at 8 is 0xFFFFFFFF, the packet-size code at 12
+  // is 2, the baud coefficient at 14 gives exactly the rate it answers on,
+  // Secur Level lands at 20, and the table flag at 126 is the 0x1234 the manual
+  // says marks an initialised table.
   out->device_address  = rd32(page, 8);
   out->capacity        = rd16(page, 4);
   out->baud            = (uint32_t)rd16(page, 14) * 9600u;

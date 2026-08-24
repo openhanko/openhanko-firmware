@@ -794,6 +794,44 @@ than a gate:
 cmake -S src -B build-lab -DFINGERPRINT_LAB_TOOLS=ON
 ```
 
+### The answer: register 7 is inert on this firmware
+
+Run, in order, on a module we were prepared to lose:
+
+```
+FINGERPRINT_REG 200 0   → cc=1a no_such_register
+FINGERPRINT_REG 7 5     → cc=00 written        (5 is Reserved in the manual)
+FINGERPRINT_REG 7 3     → cc=00 written        (a second write to a one-way register)
+FINGERPRINT_INFO        → seclevel=0
+```
+
+The first line is what makes the rest readable: this firmware **does** validate
+register numbers, so unlike the `0xE2` probe, a refusal here would have meant
+something. Register 7 is not refused — and then accepts a Reserved value, accepts
+a second write to a register the manual says "changes are not allowed after
+setting", and changes nothing.
+
+`seclevel` is read from offset 20 of the info page, and that offset is not a
+guess: the manual's parameter list lands on the page in its numbered order as
+consecutive 2-byte fields, which puts `Data Base Size` at 4 (the 100 the module
+reports), the device address at 8, packet size at 12, the baud coefficient at 14
+(×9600 = the rate it answers on), `Secur Level` at 20, and the table flag at 126
+holding the documented `0x1234`. Six anchors agreeing on one layout.
+
+**So the encryption levels are not implemented here.** Register 7 is accepted by
+a range check and wired to nothing, which is also why the safety instruction set
+answers exactly like an unimplemented opcode — the two findings are the same
+finding. Nothing was lost: at level 0 the module keeps `PS_Search`,
+`PS_StoreChar` and `PS_AutoEnroll`, so it still verifies fingerprints normally.
+
+That closes it for these modules. What remains is a module from a line that has
+the security chip, and this one identifies itself well enough to ask Hi-Link
+directly: `model="XS-F2 SO" sw="Ver 5.01" mfr=" FPPASS" sensor="ICNF7352"`.
+
+Meanwhile a PIN mixed into the key-wrapping KDF closes the same attack without
+depending on any of this — see
+[THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered).
+
 ### Why level 3 and not level 21
 
 The ECC level looks like the stronger choice and is not, for two reasons.
