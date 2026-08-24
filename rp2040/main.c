@@ -304,6 +304,12 @@ static void enroll_finish(bool ok) {
 static void enroll_gate(void) {
   if (enroll_state != ENROLL_IDLE || !fingerprint_present()) return;
 
+  // A click with nothing on the sensor is not a refusal, it is not a request at
+  // all — so say nothing. Flashing red there answers a question nobody asked,
+  // and worse, it makes the one gesture that is supposed to do nothing look like
+  // it did something and failed.
+  if (fingerprint_touch_wired() && !fingerprint_finger_down()) return;
+
   if (fingerprint_template_count() == 0) {
     // Nothing to match against, and nothing yet to protect: with no templates
     // the device cannot authenticate for anybody, so there is no capability
@@ -328,6 +334,10 @@ static void enroll_gate(void) {
     printf("main: enrollment refused: no matching finger on the sensor\n");
     config_console_send_line("EVENT ENROLL_REFUSED");
     fingerprint_light(FP_LIGHT_FLASH, FP_LED_RED, 1);
+    // The module lights its own ring during the failed match and leaves it
+    // breathing. Hand the indicator back, or it stays lit until something else
+    // happens to change the mode.
+    mirror_light_invalidate();
   }
 }
 
@@ -338,6 +348,9 @@ static void poll_enrollment(void) {
     if ((int32_t)(now_ms() - enroll_deadline) < 0) return;
     enroll_state = ENROLL_IDLE;
     enroll_owns_ring = false;
+    // The module has had the ring throughout; take it back explicitly rather
+    // than assuming our cached idea of what is showing still holds.
+    mirror_light_invalidate();
     // A device with no finger enrolled is inert, so keep asking rather than
     // going dark and leaving the user with nothing to act on.
     if (fingerprint_present() && fingerprint_template_count() < ENROLL_MINIMUM) {
@@ -386,6 +399,9 @@ static void poll_enrollment(void) {
 // The sensor replaces the button as the presence gesture without changing what
 // presence *means*, so everything downstream — the signing window, the typed
 // PIN, the acknowledgement — is untouched.
+// True once a match has been accepted, until the finger comes off again.
+static bool finger_seen;
+
 static void poll_fingerprint(void) {
   if (!fingerprint_present()) return;
 
@@ -393,7 +409,18 @@ static void poll_fingerprint(void) {
   // and a search over UART — only happens when a finger is actually present.
   // Without it, fingerprint_finger_down() is itself a capture attempt and this
   // is merely where the polling happens.
-  if (fingerprint_touch_wired() && !fingerprint_finger_down()) return;
+  if (fingerprint_touch_wired() && !fingerprint_finger_down()) {
+    finger_seen = false;
+    return;
+  }
+
+  // One match per touch. A finger left resting on the sensor otherwise matches
+  // again every poll — four EVENT FINGER for a single sudo — and each of those
+  // is a full capture and search over the UART, so the link never goes quiet and
+  // the presence window keeps being reopened by one continuous act of presence.
+  // The button has had a minimum interval for exactly this reason; this is the
+  // sensor's version of it, and with TouchOut wired the lift is a GPIO read.
+  if (finger_seen) return;
 
   static uint32_t last_poll;
   if ((now_ms() - last_poll) < FINGERPRINT_POLL_MS) return;
@@ -406,9 +433,13 @@ static void poll_fingerprint(void) {
     // already OFF it saw nothing to do and the ring stayed lit. Invalidate the
     // cache so the next pass repaints whatever the indicator actually wants.
     mirror_light_invalidate();
+    // Also wait for a lift after a rejection, or the same unrecognised finger is
+    // re-tested several times a second for as long as it rests there.
+    finger_seen = true;
     return;
   }
 
+  finger_seen = true;
   printf("main: fingerprint matched slot %u (score %u)\n", slot, score);
   config_console_send_line("EVENT FINGERPRINT");
   note_presence("FINGER");
