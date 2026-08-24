@@ -150,6 +150,19 @@ bool fingerprint_read_info(fp_info_t *out);
 // actually live. Returns bytes stored.
 uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
 
+// PS_WriteReg: writes one module register, returning the raw confirmation code.
+//
+// The register table, from the manual: 0 serial-port delay, 1 EnrollTimes,
+// 2 image format, 3 register logic, 4 baud rate, 5 comparison threshold,
+// 6 packet size, **7 encryption level**, 8 anti-fake (reserved).
+//
+// 0x00 written, 0x1a no such register, 0x1b value not allowed for it, 0x18 the
+// module's flash write failed, 0xff no module.
+//
+// **Register 7 cannot be written twice**: "changes are not allowed after
+// setting". Everything else here is ordinary configuration.
+uint8_t fingerprint_write_register(uint8_t reg, uint8_t value);
+
 // Asks whether this module implements the safety instruction set at all, by
 // issuing one member of it and returning the raw confirmation code.
 //

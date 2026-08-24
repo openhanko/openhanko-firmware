@@ -11,6 +11,14 @@ project(openhanko C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 pico_sdk_init()
 
+# Bench-only module register writes, off in anything anyone flashes.
+#
+# FINGERPRINT_REG can set the module's encryption level, which the manual says
+# cannot be changed once set. That is the only irreversible thing a host can
+# reach in this firmware, so it is kept out of the firmware a host normally
+# talks to rather than gated inside it.
+option(FINGERPRINT_LAB_TOOLS "Expose FINGERPRINT_REG for module bring-up" OFF)
+
 add_executable(openhanko
   otp.c
   main.c
@@ -31,6 +39,12 @@ add_executable(openhanko
 target_include_directories(openhanko PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 # Assembles ws2812.pio into ws2812.pio.h.
+if(FINGERPRINT_LAB_TOOLS)
+  target_compile_definitions(openhanko PRIVATE FINGERPRINT_LAB_TOOLS=1)
+  message(WARNING "FINGERPRINT_LAB_TOOLS is ON: this build can permanently set "
+                  "the fingerprint module's encryption level. Do not ship it.")
+endif()
+
 pico_generate_pio_header(openhanko ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
 target_link_libraries(openhanko

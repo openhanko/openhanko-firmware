@@ -254,6 +254,63 @@ static void handle_command(void) {
     }
     send_line(line);
 
+#if FINGERPRINT_LAB_TOOLS
+  } else if (strncmp(command, "FINGERPRINT_REG ", 16) == 0) {
+    // Writes one module register. Bench builds only: -DFINGERPRINT_LAB_TOOLS=ON.
+    //
+    // This is the one irreversible, host-reachable thing in the firmware, which
+    // is why it is not in the firmware anyone ships. Register 7 is the
+    // encryption level and the manual is explicit that "changes are not allowed
+    // after setting" — a module set to a level whose protocol we cannot speak
+    // has no way back and no way to verify a fingerprint, because levels 2 and
+    // above also refuse PS_Search, PS_StoreChar and PS_AutoEnroll.
+    //
+    // The confirmation codes make a non-destructive ladder possible, and it is
+    // worth climbing before setting anything for real:
+    //
+    //   FINGERPRINT_REG 200 0   expect 1a — proves the module validates the
+    //                           register number rather than acking any write
+    //   FINGERPRINT_REG 7 5     expect 1b — 5 is Reserved in the level table, so
+    //                           a refusal proves register 7 exists *and* has a
+    //                           value table, without changing it
+    //   FINGERPRINT_REG 7 3     the real thing, AES-128, one way only
+    //
+    // If step one returns 00, this module acks writes it does not understand and
+    // nothing below it means anything.
+    char *sep = strchr(command + 16, ' ');
+    if (!sep) {
+      send_line("ERR FINGERPRINT_REG usage=<reg> <value>");
+      return;
+    }
+    *sep = '\0';
+    unsigned long reg = strtoul(command + 16, NULL, 0);
+    unsigned long value = strtoul(sep + 1, NULL, 0);
+    if (reg > 255 || value > 255) {
+      send_line("ERR FINGERPRINT_REG range");
+      return;
+    }
+    // Register 4 is the baud rate. Writing it would strand the module on a rate
+    // this firmware does not open, which is a way to lose a module without
+    // learning anything.
+    if (reg == 4) {
+      send_line("ERR FINGERPRINT_REG baud_rate_refused");
+      return;
+    }
+    if (!require_config_authorization()) return;
+    if (!demand_button_press()) return;
+    uint8_t cc = fingerprint_write_register((uint8_t)reg, (uint8_t)value);
+    const char *meaning =
+        cc == 0x00 ? "written" :
+        cc == 0x1a ? "no_such_register" :
+        cc == 0x1b ? "value_not_allowed" :
+        cc == 0x18 ? "module_flash_error" :
+        cc == 0x01 ? "packet_error" :
+        cc == 0xff ? "no_module" : "unexpected";
+    snprintf(line, sizeof(line), "OK FINGERPRINT_REG reg=%lu value=%lu cc=%02x %s",
+             reg, value, cc, meaning);
+    send_line(line);
+#endif
+
   } else if (strcmp(command, "FINGERPRINT_SN") == 0) {
     // The per-unit identity, and the one to bind against. Two modules from one
     // reel must differ here; if they do not, module binding is not possible at

@@ -59,6 +59,8 @@
 #define CC_NOT_EMPTY      0x22
 #define CC_DB_FULL        0x1f
 #define CC_TIMEOUT        0x26
+#define INS_WRITE_REG 0x0e
+
 // Safety instruction set, 0xE0-0xE4. Only 0xE2 is issued here, and only to ask
 // whether the module knows the opcode at all — see fingerprint_security_probe().
 #define INS_SEC_GET_CIPHERTEXT 0xe2
@@ -782,6 +784,16 @@ static uint16_t drain_raw(uint8_t *out, uint16_t cap, uint32_t window_ms) {
   return n;
 }
 
+uint8_t fingerprint_write_register(uint8_t reg, uint8_t value) {
+  if (!module_present) return 0xff;
+  // Per the manual the module answers on the old configuration and only then
+  // applies the change and writes it to its flash, so the acknowledgement always
+  // arrives at the current baud rate even when the register being written is the
+  // baud rate. The timeout is generous because a flash write is involved.
+  uint8_t params[2] = {reg, value};
+  return exchange(INS_WRITE_REG, params, sizeof(params), NULL, 0, NULL, 2000);
+}
+
 uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len,
                                    uint8_t *control_cc) {
   if (out_len) *out_len = 0;
@@ -858,6 +870,7 @@ bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) { (void)slot; (void)
 bool fingerprint_erase_all(void) { return false; }
 bool fingerprint_light(fp_light_t e, fp_color_t c, uint8_t n) { (void)e; (void)c; (void)n; return false; }
 bool fingerprint_random(uint32_t *out) { (void)out; return false; }
+uint8_t fingerprint_write_register(uint8_t r, uint8_t v) { (void)r; (void)v; return 0xff; }
 uint8_t fingerprint_security_probe(uint8_t *o, uint16_t c, uint16_t *l, uint8_t *k) {
   (void)o; (void)c; if (l) *l = 0; if (k) *k = 0xff; return 0xff;
 }

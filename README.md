@@ -759,12 +759,40 @@ What the probe does establish: the dispatcher is not indiscriminate in general
 and the stream path is not at fault (`PS_ReadINFpage` moves 512 bytes through
 it). Neither of those decides the question.
 
-**Only raising the level decides it, and that write is one-way.** On a spare
-module: set register 7 to 3, then try `PS_GetKeyt`. If the set is there, it
-answers and the design above becomes buildable. If it is not, that module is
-finished — level 3 refuses `PS_Search`, `PS_StoreChar` and `PS_AutoEnroll`, so a
-module that has neither those nor the safety set cannot verify a fingerprint at
-all. The experiment costs exactly one module and answers definitively.
+**Raising the level decides it, and that write is one-way** — but two steps
+before it are not, and they may answer without spending anything.
+
+`PS_WriteReg` (`0x0E`) validates what it is given: `0x1a` for a register that
+does not exist, `0x1b` for a value that register does not accept, and neither
+changes anything. Register 7 is the encryption level, and 5 is Reserved in its
+value table. So:
+
+```sh
+./provision.py console 'FINGERPRINT_REG 200 0'   # expect cc=1a
+./provision.py console 'FINGERPRINT_REG 7 5'     # expect cc=1b
+./provision.py console 'FINGERPRINT_REG 7 3'     # the real one, AES-128
+```
+
+The first asks whether the module validates register numbers at all. If it
+returns `00`, it acknowledges writes it does not understand and nothing below it
+means anything — the same trap `FINGERPRINT_SECPROBE` fell into.
+
+The second is the one that matters. `1b` means register 7 exists *and* has a
+value table to check against, which is as close to "the encryption levels are
+real on this part" as anything reachable without committing. `1a` means there is
+no register 7, and the safety set is not there either.
+
+Only then the third, which cannot be undone. If the set is absent afterwards
+that module is finished: level 3 also refuses `PS_Search`, `PS_StoreChar` and
+`PS_AutoEnroll`, so it would have neither the ordinary path nor the secure one.
+
+`FINGERPRINT_REG` is **not in the firmware anyone ships**. It is the only
+irreversible thing a host could reach, so it lives behind a build option rather
+than a gate:
+
+```sh
+cmake -S src -B build-lab -DFINGERPRINT_LAB_TOOLS=ON
+```
 
 ### Why level 3 and not level 21
 
