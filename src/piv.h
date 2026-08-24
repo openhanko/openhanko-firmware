@@ -33,6 +33,11 @@ void piv_set_presence_source(const char *source);
 // rather than 6982, so a host can tell "touch it" from "set it up first".
 void piv_set_setup_incomplete(bool incomplete);
 
+// Tells the applet the sensor has been swapped. Everything is refused with 6983
+// until a factory reset, which is the only recovery.
+void piv_set_module_mismatch(bool mismatch);
+bool piv_module_mismatch(void);
+
 // Marks the PIN as verified without an APDU. Used by the pinpad path, where
 // the host delegates PIN entry to the reader and no VERIFY ever arrives.
 void piv_note_pin_verified(void);

@@ -417,6 +417,10 @@ static void poll_enrollment(void) {
 // True once a match has been accepted, until the finger comes off again.
 static bool finger_seen;
 
+// Set at boot when the fingerprint module is not the one this device was bound
+// to. Latched: nothing clears it but a factory reset.
+static bool module_mismatch;
+
 
 static void poll_fingerprint(void) {
   if (!fingerprint_present()) return;
@@ -545,6 +549,37 @@ int main(void) {
   config_console_init();
   usb_ccid_start(piv_handle_apdu);
 
+  // Bind to the fingerprint module, or notice that it has changed.
+  //
+  // Recorded on a device that has no module stored, which after a factory reset
+  // is whatever is in front of it. A device that meets a different module later
+  // refuses everything until it is reset — see settings.h for why that is the
+  // only recovery offered.
+  if (fingerprint_present()) {
+    uint8_t serial[SETTINGS_SERIAL_LEN];
+    if (fingerprint_chip_serial(serial)) {
+      if (!settings_module_bound()) {
+        if (settings_bind_module(serial)) {
+          printf("main: bound to this fingerprint module\n");
+          config_console_send_line("EVENT MODULE_BOUND");
+        }
+      } else if (memcmp(serial, settings_module_serial(), sizeof(serial)) != 0) {
+        module_mismatch = true;
+        printf("main: FINGERPRINT MODULE CHANGED; refusing everything\n");
+        config_console_send_line("EVENT MODULE_MISMATCH");
+      }
+    } else {
+      // A module that answers the handshake but not PS_GetChipSN is not one we
+      // can vouch for either. Fail closed.
+      module_mismatch = settings_module_bound();
+      if (module_mismatch) {
+        printf("main: fingerprint module would not identify itself\n");
+        config_console_send_line("EVENT MODULE_UNIDENTIFIED");
+      }
+    }
+  }
+  piv_set_module_mismatch(module_mismatch);
+
   // A device with an identity but no enrolled finger cannot authenticate for
   // anyone, because the button does not do it. So there is no useful state
   // between blank and enrolled, and nothing is gained by making the user
@@ -569,6 +604,25 @@ int main(void) {
     config_console_poll();
     upgrade_if_driver_present();
     revert_if_unclaimed();
+
+    if (module_mismatch) {
+      // Nothing else happens on a device whose sensor has been changed: no
+      // matching, no enrolment, no configuration. The ring says so in the one
+      // colour that means stop, and keeps saying it.
+      // Cycle count 0 is an infinite loop, per the manual, so this is sent once
+      // and runs until something stops it. Sending a bounded burst on a timer
+      // left gaps, and the module filled them with the blue breathing it does by
+      // default — a device refusing to work should not spend half its time
+      // showing its idle colour.
+      static bool warned;
+      if (!warned) {
+        warned = true;
+        fingerprint_light(FP_LIGHT_FLASH, FP_LED_RED, 0);
+      }
+      tud_task();
+      config_console_poll();
+      continue;
+    }
 
     // Keep the applet's idea of readiness current: a sensor with nothing
     // enrolled cannot authorise anything, and the status word should say so.

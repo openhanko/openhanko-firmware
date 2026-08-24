@@ -105,6 +105,14 @@ static uint32_t session_presence_until;
 // satisfied — means the request cannot succeed in the device's current state,
 // which is exactly the distinction.
 static bool setup_incomplete;
+
+// True when the fingerprint module is not the one this device was set up with.
+// Everything is refused: the sensor is what stands between a stolen device and
+// its key, so a swapped one is the cheapest way past it and must not be a way
+// past it at all.
+static bool module_mismatch;
+void piv_set_module_mismatch(bool mismatch) { module_mismatch = mismatch; }
+bool piv_module_mismatch(void) { return module_mismatch; }
 void piv_set_setup_incomplete(bool incomplete) { setup_incomplete = incomplete; }
 static uint32_t pairing_mode_until;
 static uint32_t challenge_until;
@@ -575,6 +583,13 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
   if (!(apdu[3] == 0x9a || apdu[3] == 0x9d)) {
     return append_sw(response, response_len, response_cap, 0x6a86);
   }
+  if (module_mismatch) {
+    // 6983, authentication method blocked: the way in exists and has been shut,
+    // which is a different thing from needing a step or being unconfigured.
+    LOG("refused: fingerprint module is not the one this device was bound to");
+    return append_sw(response, response_len, response_cap, 0x6983);
+  }
+
   if (setup_incomplete) {
     LOG("refused: no fingerprint enrolled, the device is not set up");
     return append_sw(response, response_len, response_cap, 0x6985);

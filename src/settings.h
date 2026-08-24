@@ -28,7 +28,21 @@ typedef enum {
   AID_MODE_PINPAD = 1,
 } aid_mode_t;
 
+#define SETTINGS_SERIAL_LEN 32
+
 void settings_init(void);
+
+// The fingerprint module this device was set up with.
+//
+// Recorded the first time a module is seen on a device that has none stored,
+// which after a factory reset is the module in front of it. A device that later
+// meets a different one refuses to authenticate: the sensor is the only thing
+// standing between a stolen device and its key, and swapping it for one an
+// attacker controls is the cheapest way past it. Factory reset is the recovery,
+// and the only one — a sensor does not get replaced during the life of a unit.
+bool settings_module_bound(void);
+const uint8_t *settings_module_serial(void);
+bool settings_bind_module(const uint8_t *serial);
 
 aid_mode_t settings_aid_mode(void);
 

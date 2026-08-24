@@ -156,7 +156,8 @@ static void handle_command(void) {
              chip_stepping(),
              // What can authorise a signature. Without a sensor nothing can:
              // the button configures the device and never authenticates it.
-             fingerprint_present() ? "fingerprint" : "none",
+             piv_module_mismatch() ? "blocked"
+                                   : (fingerprint_present() ? "fingerprint" : "none"),
              piv_has_identity() ? "loaded" : "unconfigured",
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
