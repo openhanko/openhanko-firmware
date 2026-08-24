@@ -7,7 +7,8 @@ Writes into `out/`:
 
     signed-primary.uf2      the firmware, signed with the first key
     signed-spare.uf2        the same firmware, signed with the second
-    stage1-keys.json        install both keys; signatures not yet required
+    stage1-keys.json        install both keys, and the bootrom's double-tap
+                            recovery; signatures not yet required
     stage2-enable.json      require a valid signature to boot
     revoke-primary.json     retire the first key, leaving the spare
 
@@ -40,6 +41,20 @@ SLOT_PRIMARY = 0
 SLOT_SPARE = 1
 KEY_VALID = (1 << SLOT_PRIMARY) | (1 << SLOT_SPARE)   # 0b0011
 KEY_INVALID_UNUSED = 0b1100
+
+# Recovery, and it has to be burned before secure boot rather than after.
+#
+# The SDK's pico_bootsel_via_double_reset runs in the application: it stashes a
+# magic in the watchdog scratch and a second reset catches it. Enabling secure
+# boot stops that working, and the reason it stops is the reason it was never
+# enough — it needs the firmware to boot, which is not the situation you want a
+# recovery path for.
+#
+# The bootrom has its own, keyed off POWMAN_CHIP_RESET_DOUBLE_TAP, which the
+# external reset pin does not clear. It runs before any application, so it
+# rescues a board whose firmware is broken, unsigned or absent. 200 ms of boot
+# delay for a way back into a sealed unit.
+DOUBLE_TAP_DELAY = 3   # 3 = 200 ms; 0-7, where 7 is 400 ms
 
 
 def picotool() -> str:
@@ -97,7 +112,12 @@ def main() -> None:
     write("stage1-keys.json", {
         "bootkey0": fp_primary,
         "bootkey1": fp_spare,
-        "boot_flags1": {"key_valid": KEY_VALID, "key_invalid": KEY_INVALID_UNUSED},
+        "boot_flags1": {
+            "key_valid": KEY_VALID,
+            "key_invalid": KEY_INVALID_UNUSED,
+            "double_tap": 1,
+            "double_tap_delay": DOUBLE_TAP_DELAY,
+        },
     })
     write("stage2-enable.json", {"crit1": {"secure_boot_enable": 1}})
     # Retiring the primary keeps the bits already burned: OTP only ever goes
