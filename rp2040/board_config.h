@@ -80,9 +80,18 @@
 // support at all; leaving it configured on a board with nothing attached is
 // also fine, since the module is detected at startup and its absence simply
 // leaves the button as the trigger.
+// These name the MCU's own pins, not the module's, and the two cross over.
+// GP4 is UART1 TX in silicon — an output — so it drives the module's RX input;
+// GP5 is UART1 RX and listens to the module's TX output. Wiring TX to TX gives
+// two outputs fighting each other and a module that never answers, which is
+// indistinguishable from a dead module.
+//
+//     MCU GP4  (UART1 TX, output) ---> ZW111 pin 5  RX
+//     MCU GP5  (UART1 RX, input)  <--- ZW111 pin 4  TX
+//
 #define FINGERPRINT_UART_INSTANCE uart1
-#define FINGERPRINT_UART_TX 4
-#define FINGERPRINT_UART_RX 5
+#define FINGERPRINT_UART_TX 4   // MCU transmits here; goes to the module's RX
+#define FINGERPRINT_UART_RX 5   // MCU receives here; comes from the module's TX
 #define FINGERPRINT_BAUD 57600
 
 // The module's TouchOut line (ZW111 pin 2), which asserts while a finger is on

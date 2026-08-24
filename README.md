@@ -120,7 +120,7 @@ the sensor entirely.
 
 | function | pin |
 | --- | --- |
-| fingerprint module | **GP4** TX, **GP5** RX — UART1, 57600, HLK-ZW111<br>**GP6** TouchOut |
+| fingerprint module | UART1 @57600: **GP4** = MCU TX, **GP5** = MCU RX, **GP6** TouchOut |
 | configuration button | **GP12** to GND, internal pull-up — factory reset and enrollment only, never authentication |
 | indicator | none on the board: the module's own ring is the entire indicator |
 
@@ -143,14 +143,20 @@ Never ship an image built that way.
 
 The ZW111 harness is six wires, not four:
 
-| ZW111 pin | to |
-| --- | --- |
-| 1 `V_Touch` | 3V3 — **permanently powered**, this is what runs finger detection while the rest of the module sleeps |
-| 2 `TouchOut` | GP6 — asserts while a finger is on the sensor |
-| 3 `VCC` | 3V3 |
-| 4 `TX` | GP5 (module → MCU) |
-| 5 `RX` | GP4 (MCU → module) |
-| 6 `GND` | GND |
+| ZW111 pin | to | direction |
+| --- | --- | --- |
+| 1 `V_Touch` | 3V3 | **permanently powered** — runs finger detection while the rest of the module sleeps |
+| 2 `TouchOut` | GP6 | module → MCU, asserts while a finger is on the sensor |
+| 3 `VCC` | 3V3 | |
+| 4 `TX` | **GP5** | module → MCU |
+| 5 `RX` | **GP4** | MCU → module |
+| 6 `GND` | GND | |
+
+**The UART lines cross.** The module's `TX` is an output and goes to GP5, which
+is the MCU's receiver; the module's `RX` is an input and comes from GP4, the
+MCU's transmitter. `FINGERPRINT_UART_TX` in `board_config.h` names the *MCU's*
+TX pin, not the module's — TX to TX is two outputs driving each other, and the
+symptom is a module that handshakes with nothing and looks dead.
 
 `V_Touch` is a power rail, not an option: it runs finger detection while the
 rest of the module sleeps, so it is in the harness regardless. `TouchOut` is the
