@@ -64,10 +64,17 @@ meaningless without saying which one it describes.
 Only the last row makes a stolen device inert. Read `chip=` from `STATUS` to
 find out which silicon is in front of you; nothing else reports it reliably.
 
-**Everything so far is row 2** — A4 silicon with nothing fused. The RP2354A's
-in-package flash raises the cost of the offline attack even at that row: there is
-no separate chip to lift off, so reading it means decapsulation rather than hot
-air.
+**A provisioned unit is row 4** — A4 silicon, secure boot on, SWD fused, key
+material wrapped to a chaffed OTP secret. Verified end to end on hardware: the
+bootloader reads that page as zeros and `picotool` is refused, while the signed
+firmware on the same die reads it and decrypts its identity.
+
+The RP2354A's in-package flash raises the cost again. There is no separate chip
+to lift off, so the offline attack starts at decapsulation rather than hot air —
+and what it recovers is ciphertext.
+
+Row 5 needs a PIN and does not exist. `STATUS` reports `chip=` and `otp=`, which
+between them say which row a device is actually on.
 
 ## 5. Today: what actually gates what
 
@@ -152,19 +159,21 @@ Ordered by what they actually close, not by effort.
 | defence | closes | does not close |
 | --- | --- | --- |
 | RP2350 **A4** silicon | E16 glitch-to-debug, E20 unsigned boot, E24 laser fault | anything above |
-| Secure boot + SWD fused | reading the key off a live device through the debug port | desoldering the flash |
-| **Key wrapped to an OTP secret** | attacker B — flash reader yields ciphertext | attacker C, who has the die and can ask the firmware to sign |
-| OTP **chaffing** (complementary bit pairs) | the IOActive PVC/FIB antifuse read — the one hardware attack **A4 does not fix** | — |
+| Secure boot + SWD fused *(done)* | reading the key over the debug port; flashing firmware that prints the secret | desoldering the flash |
+| **Key wrapped to an OTP secret** *(done)* | attacker B — a flash reader yields ciphertext | attacker C, who has the die and can ask the firmware to sign |
+| OTP **chaffing** *(done)* | the IOActive PVC/FIB antifuse read — the one hardware attack **A4 does not fix** | a lab willing to spend more than the chaffing costs |
+| Two boot keys with revocation *(done)* | a leaked or lost signing key ending the fleet | a leak nobody notices |
 | Sensor binding via `PS_GetChipSN` *(done)* | swapping the module for another — the serial is per-die, confirmed across two units | an emulator replaying the expected serial |
 | `TouchOut` correlation *(done)*, staged protocol, timing bounds | replaying one packet on RX | reading the published protocol and driving two lines |
 | **PIN mixed into the wrapping KDF** | **attacker C** — a stolen device is inert, forging a match unwraps nothing | someone who watches the user type the PIN |
 
 Two notes that are easy to get wrong:
 
-**A PIN checked only in firmware buys almost nothing.** RP2350-Zero keeps data in
-a *separate QSPI flash package*, and secure boot verifies what executes without
-encrypting what is stored. Desolder, read, ignore the firmware. Only a PIN that
-is an *input to the KDF* survives that.
+**A PIN checked only in firmware buys almost nothing.** Secure boot verifies what
+executes without encrypting what is stored, so a PIN the firmware merely checks
+is bypassed by reading the flash. Only a PIN that is an *input to the KDF*
+survives that — and with the OTP secret already in the KDF, a PIN would be the
+second input rather than the first.
 
 **A real PIN means the device must stop typing it.** In driverless mode the
 device types the PIN over HID; a PIN the device knows is not a secret from
@@ -173,10 +182,12 @@ per session, then touch — not a flag flip.
 
 ## 8. Gaps, ordered
 
-1. **No real PIN.** Blocks the only defence against attacker C. Needs the at-rest
-   work first, which needs RP2350.
-2. **Key material is plaintext at rest**, and on RP2350-Zero that flash is a
-   separate package.
+1. **No real PIN.** The only remaining defence against attacker C, who holds the
+   device and can drive the sensor link. The at-rest work it depended on is
+   done, so this is now buildable rather than blocked.
+2. **The firmware is the oracle.** It can read the OTP secret — that is the
+   design — so a bug that leaks it costs everything the lockdown bought. A
+   standing constraint, not a task: never add anything that returns it.
 3. **No rate limiting** on signature operations.
 4. **A touch authorises a window, not an operation.** Slot 9A accepts any
    signature for 10 s after a match and slot 9D for 60 s, the latter not
@@ -185,25 +196,34 @@ per session, then touch — not a flag flip.
 
 ## 9. Claims we may and may not make
 
-**May:**
+**May, of a provisioned unit:**
 
-- The private key is generated on the device and is never transmitted, copied or
-  backed up — no provisioning machine ever held it. That is a statement about
-  normal operation, not about an attacker with the device: see §4, where every
-  shipped state still has it extractable.
-- A compromised host cannot sign without a physical press.
+- The private key is generated on the device, never transmitted, never copied to
+  a host. No provisioning machine ever held it.
+- It is stored encrypted, under a key the flash does not contain.
+- The debug port is fused shut and only firmware signed with our key will run.
+- A compromised host cannot sign without a fingerprint.
 - Credentials cannot be erased by any host command.
+- The device refuses to work if its fingerprint sensor is exchanged.
 - Firmware, hardware and protocol are published.
 
-**May not, today:**
+Each of those was verified on hardware rather than reasoned about. Two were
+wrong when first written and only the checking found it: the flash held 204
+bytes of plaintext after every write, and a device with secure boot lost its
+recovery path entirely.
 
-- ~~"The debug port is locked."~~ Not enabled on any unit.
-- ~~"Tamper-resistant."~~ No secure element, and SWD is not fused on any unit yet.
-- ~~"Safe for SSH keys."~~ Precisely the case with no defence.
+**May not:**
+
+- ~~"Tamper-proof."~~ Passive voltage contrast with an ion beam reads antifuse
+  cells directly. Chaffing raises the price; it does not close it.
+- ~~"Safe for SSH keys."~~ Still the case with the least defence — see §6.
 - ~~"The fingerprint proves it is you."~~ It proves an enrolled finger is on the
-  sensor, which is not the same claim: the link carrying that answer is
-  unauthenticated, so someone who opens the case can assert it without a finger.
+  bound sensor. The link carrying that answer is unauthenticated, so someone who
+  opens the case can assert it without a finger.
+- ~~"A stolen device is safe."~~ It is not, and §6 says how far that goes.
 
-**Must state plainly:** a stolen device is a full compromise of every credential
-on it. For local unlock that is bounded by needing the user's Mac. For anything
-remote-capable it is not bounded at all.
+**Must state plainly:** a stolen device still authorises whatever a forged sensor
+answer authorises. Binding stopped the sensor being *swapped*; nothing yet stops
+it being *driven*. For local unlock the exposure is bounded by needing the user's
+Mac. For anything remote-capable it is not bounded at all, and no amount of the
+work above changes that — only a PIN would.

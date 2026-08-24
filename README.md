@@ -25,9 +25,8 @@ a host.
 
 Not done:
 
-- `fingerprint.c` is written against the EF-01 protocol but **untested against a
-  module**, and so is the enrollment gesture built on it.
-- Secure boot, OTP and debug lockout are not enabled.
+- Nothing. The sensor, the enrolment gesture, module binding, encryption at
+  rest, secure boot and debug lockout are all working on hardware.
 - The custom RP2354A boards are at fab; development is on an RP2350-Zero.
 
 ## Compared with tinyTouch
@@ -56,13 +55,12 @@ Measured against `firmware/tiny_touch_smartcard` as of August 2026.
 | host software | Python LaunchAgent, AES/HMAC over HID | signed and notarised CryptoTokenKit extension |
 | factory reset without a host | no | button held through power-up, release commits |
 | on-device diagnostics | `STATUS` | `STATUS`, plus a `TRACE` ring buffer of CCID and APDU activity and `BENCH` |
-| fingerprint sensor | ZW101, working | ZW111, written and **untested** |
+| fingerprint sensor | ZW101 | ZW111, bound to the device by its per-die serial |
+| key material at rest | plaintext in NVS | AES-256-GCM under a secret in OTP |
+| secure boot | none | signed images, two keys with revocation |
 
 ### What upstream has that this does not
 
-- **A fingerprint driver that has met a sensor.** `fingerprint.c` here is written
-  from the EF-01 protocol and has never been run against hardware. Upstream's
-  has.
 - **A real password channel.** `touch_pin_hid.c` is 248 lines of AES/HMAC keyed
   to the host helper, so the device can type an actual password rather than a
   fixed dummy PIN. Dropped here entirely — the CryptoTokenKit route made it
@@ -627,6 +625,82 @@ through `SecKeyCreateSignature`. It was removed because:
 The firmware ECDH, the AID mode switching and the driver architecture came out
 of that work. The code is in the history.
 
+## Provisioning a unit
+
+```sh
+./bootkeys.py primary.pem spare.pem build-rp2350/openhanko.uf2 out/
+./provision-board.py out/            # rehearse, touching nothing
+./provision-board.py out/ --commit
+```
+
+That takes a blank board to a finished one: signed firmware, both boot keys, the
+bootrom's recovery, a device secret, key material encrypted at rest, secure boot,
+and no debug port. Every OTP write is permanent, so the script verifies what
+landed before continuing and refuses on any disagreement.
+
+**The order is not arbitrary and not obvious.** The device burns its own secret
+the first time it generates an identity, so it has to boot and run *before* page
+4 is locked — lock first and it can never write one, and a device with no secret
+cannot store an identity at all, which looks like a working board right up until
+you try to pair it. Secure boot comes after that firmware is proven to boot on
+that board. Debug goes last, because it is the step that removes the ability to
+diagnose the others.
+
+A run that stops partway leaves a real board in a real state, so the script
+resumes by reading OTP rather than by being told where it got to.
+
+### The two keys
+
+Four boot key slots exist. Two are used and the other two are marked invalid,
+which the datasheet asks for: otherwise somebody who later gets a write to OTP
+can install a key of their own and sign what they like.
+
+The second key is a recovery path, not a copy. If the primary leaks, revoke it
+and sign with the spare — the fleet survives. With one key, a leak or a loss is
+terminal for every unit ever burned. Verified on hardware: primary-signed
+rejected after revocation, spare-signed still boots.
+
+Keep the spare offline. It is worth nothing if it lives beside the primary.
+
+### Recovery
+
+`BOOT_FLAGS1.DOUBLE_TAP` is burned during stage 1, before secure boot, and it
+matters that it is the bootrom's mechanism rather than the SDK's. The SDK's ran
+in the application; enabling secure boot stops it working, and it needed the
+firmware to boot — which is not when a way back in is wanted. The bootrom's runs
+before any application, so it rescues a board whose firmware is broken, unsigned
+or missing.
+
+BOOTSEL and picotool keep working after lockdown. That is deliberate: a unit
+stays updatable with signed firmware forever, while revealing nothing.
+
+## Key material at rest
+
+The PIV keys in flash are AES-256-GCM ciphertext under a key derived from a
+32-byte secret the device generates for itself and burns into OTP. Reading the
+flash yields nothing usable.
+
+GCM rather than a bare cipher because the tag is what makes a bad decrypt
+legible: without it a corrupted or tampered record decrypts to plausible bytes
+that mbedTLS then tries to parse as a PEM key, and the complaint arrives about
+the wrong thing entirely.
+
+The secret is stored **chaffed** — every bit beside its own complement. That is
+aimed at IOActive's passive voltage contrast attack, which reads antifuse cells
+directly rather than through any access control and recovers the bitwise OR of
+adjacent bits. It is the one Hacking Challenge finding A4 does not fix, and
+complementary pairs are Raspberry Pi's published mitigation: an all-zero secret
+and an all-ones secret produce byte-identical readouts.
+
+Once the page is locked and debug disabled, that secret is readable by signed
+firmware on that die and by nothing else — not SWD, not the bootloader, not
+`picotool otp get`.
+
+**Which makes the firmware the oracle.** It can read the secret; that is the
+design. A bug that leaks it costs everything the rest of this bought, which is
+why `OTP_STATUS` reports six bytes of a hash and never the value, and why
+nothing should ever be added that returns it.
+
 ## The sensor link cannot be authenticated
 
 Worth stating plainly, because it is the limit that no firmware here closes.
@@ -648,8 +722,8 @@ and what this driver implements:
 | `0x12` | `PS_SetPwd` — persists to flash | no |
 | `0x13` | `PS_VfyPwd` | yes |
 | `0x14` | `PS_GetRandomCode` — module's own hardware RNG | yes |
-| `0x16` | `PS_ReadINFpage` — parameter page; its Product SN is a **model** string | yes, untested |
-| `0x34` | `PS_GetChipSN` — 32-byte per-die serial | yes, untested |
+| `0x16` | `PS_ReadINFpage` — parameter page; its Product SN is a **model** string | yes |
+| `0x34` | `PS_GetChipSN` — 32-byte per-die serial | yes |
 | `0x0e` | `PS_WriteReg` — register 7 is the encryption level | no |
 | `0xe0`–`0xe4` | safety instruction set: key pair, lock, ciphertext, secure store/search | no |
 | `0x1d` | `PS_TemplateNum` | yes |
@@ -705,7 +779,10 @@ What raises cost without pretending to be authentication:
 - **Bind to the module.** `PS_GetChipSN` (`0x34`) returns a 32-byte serial the
   manual describes as unique to the die. Store a hash at pairing and refuse a
   module that changes. Defeats a swap with a stock module, not an emulator that
-  replays the expected serial. Implemented as `FINGERPRINT_SN`, untested.
+  replays the expected serial. **Implemented and in force**: the device records
+  the module it finds when it has none stored, and refuses everything if it later
+  meets a different one. Confirmed across two modules — five of the twelve
+  meaningful bytes differ, so the serial is genuinely per-die.
 
   Not the info page's Product SN, which the manual defines as "indicate product
   model" — it names the part, not the unit, and binding to it would detect only a
@@ -732,7 +809,7 @@ short version:
 
 - **A button proves presence, not identity.** While the trigger is the button,
   anyone who can reach the device can authenticate as you. The fingerprint sensor
-  is what changes that, and it is untested against hardware.
+  is what changes that, and it works.
 - **The PIN is theatre.** `VERIFY` accepts any PIN and opens a window. macOS
   insists on collecting one; the presence check is the only real gate.
 - **Keys are plaintext in flash** and come straight out over SWD. Closing this is
@@ -753,7 +830,7 @@ src/                   device firmware, RP2350 family
   piv.c                PIV applet: certificates, VERIFY, GENERAL AUTHENTICATE,
                        ECDH on slot 9D
   identity.c           generates the device's own keypair and certificate
-  fingerprint.c        HLK-ZW111 over UART (EF-01) — untested against hardware
+  fingerprint.c        HLK-ZW111 over UART (EF-01), PS_AutoEnroll, module binding
   settings.c           which AID to answer, in its own flash sector
   storage.c            the PIV identity, in flash, outside the image
   usb_ccid.c           CCID class driver over TinyUSB
