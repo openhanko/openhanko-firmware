@@ -90,11 +90,19 @@ static void note_presence(const char *source) {
   printf("main: presence from %s; authorizing PIV and typing the dummy PIN\n", source);
   config_console_send_line("EVENT PRESS");
   piv_note_user_presence();
-  char pin[PIV_DUMMY_PIN_DIGITS + 1];
-  random_pin(pin, PIV_DUMMY_PIN_DIGITS);
-  if (!usb_hid_type_line(pin)) {
-    printf("main: HID interface was not ready; PIN not typed\n");
-    config_console_send_line("EVENT PIN_NOT_TYPED");
+  // Typing the PIN is the driverless mechanism and only the driverless
+  // mechanism. In pinpad mode the driver answers the PIN request over
+  // PC_to_RDR_Secure and the card is satisfied without a keystroke — so typing
+  // there is not merely redundant, it puts six digits into whatever happens to
+  // have keyboard focus, which during a sudo is the terminal the user is
+  // looking at.
+  if (settings_aid_mode() != AID_MODE_PINPAD) {
+    char pin[PIV_DUMMY_PIN_DIGITS + 1];
+    random_pin(pin, PIV_DUMMY_PIN_DIGITS);
+    if (!usb_hid_type_line(pin)) {
+      printf("main: HID interface was not ready; PIN not typed\n");
+      config_console_send_line("EVENT PIN_NOT_TYPED");
+    }
   }
 }
 
