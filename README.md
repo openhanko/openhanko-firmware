@@ -206,11 +206,9 @@ On A2, an attacker with the device and glitching equipment can recover the
 signing key whatever the firmware does. Mass production moved to A4 in July 2025;
 A4 parts are marked `RP2350A0A4`.
 
-`BOOT_FLAGS0.DISABLE_WATCHDOG_SCRATCH` is the documented mitigation for E20 —
-but it also disables the watchdog scratch register that
-`pico_bootsel_via_double_reset` depends on. Setting it on A3 or A4 buys nothing,
-since E20 is already fixed there, and costs the double-tap-RESET route back into
-the bootloader. With SWD locked, that is the only route.
+`BOOT_FLAGS0.DISABLE_WATCHDOG_SCRATCH` is the documented mitigation for E20, and
+should not be set on A3 or A4: E20 is already fixed there, so it buys nothing,
+and it disables a register the SDK's application-level double-tap depends on.
 
 ### USB identity
 
@@ -248,10 +246,18 @@ Hold BOOTSEL while replugging, then copy the image onto the volume that appears:
 cp -X build/openhanko.uf2 /Volumes/RP2350/
 ```
 
-**Double-tap RESET** within 800 ms to enter the bootloader without the BOOTSEL
-hold (`pico_bootsel_via_double_reset`). It relies on a watchdog scratch register
-surviving the reset, so it needs a real RESET button — a power cycle will not
-trigger it.
+**Double-tap RESET** enters the bootloader without holding BOOTSEL — but only on
+a board where `BOOT_FLAGS1.DOUBLE_TAP` has been burned, which `bootkeys.py` does
+during stage 1. On a board with nothing burned, use the BOOTSEL button or short
+QSPI_SS to ground through about 1 kΩ.
+
+That flag is the bootrom's own mechanism, not the SDK's, and the difference
+matters. `pico_bootsel_via_double_reset` ran in the application: it stashed a
+magic in the watchdog scratch for a second reset to catch, which needs the
+firmware to boot — not the situation anyone wants a recovery path for. Enabling
+secure boot stops it working entirely. The bootrom's version runs before any
+application, so it rescues a board whose firmware is broken, unsigned or
+missing, and it survives secure boot. It costs 200 ms of boot rather than 800.
 
 A fresh clone needs `PICO_SDK_PATH` set explicitly. An existing `build/`
 directory caches it, so a missing SDK only surfaces on a clean checkout.

@@ -52,9 +52,6 @@ target_link_libraries(openhanko
   hardware_flash
   hardware_watchdog
   hardware_pio
-  # QMK-style magic boot: tap RESET twice to enter the bootloader, so
-  # reflashing needs neither BOOTSEL nor an unlocked console.
-  pico_bootsel_via_double_reset
   hardware_sync
   tinyusb_device
   tinyusb_board
@@ -66,14 +63,20 @@ target_link_libraries(openhanko
   pico_mbedtls_headers
 )
 
-# stdio goes to UART only. USB belongs to the smart card, and routing printf
-# through it would fight TinyUSB for the same peripheral.
-# Double-tap RESET within this window to land in the bootloader. The library
-# No activity LED configured: that option drives a plain GPIO, which would
-# corrupt the WS2812 data line rather than light it.
-target_compile_definitions(openhanko PRIVATE
-  PICO_BOOTSEL_VIA_DOUBLE_RESET_TIMEOUT_MS=800
-)
+# Double-tap RESET is the bootrom's, not the SDK's.
+#
+# pico_bootsel_via_double_reset used to provide it: the application stashed a
+# magic in the watchdog scratch and a second reset caught it. Enabling secure
+# boot stops that working, and the reason it stops is the reason it was never
+# enough — it needs the firmware to run, which is not when a recovery path is
+# wanted. It also cost 800 ms of every boot.
+#
+# BOOT_FLAGS1.DOUBLE_TAP does the same job in the bootrom, before any
+# application, so it rescues a board whose firmware is broken, unsigned or
+# absent. bootkeys.py burns it during stage 1; see THREAT-MODEL.md.
+#
+# The consequence for a board with nothing burned: no double-tap at all, so use
+# the BOOTSEL button or short QSPI_SS.
 
 pico_enable_stdio_uart(openhanko 1)
 pico_enable_stdio_usb(openhanko 0)
