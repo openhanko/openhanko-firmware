@@ -235,15 +235,20 @@ static void handle_command(void) {
     // authenticated on this part. See fingerprint_security_probe().
     uint8_t data[64];
     uint16_t data_len = 0;
-    uint8_t cc = fingerprint_security_probe(data, sizeof(data), &data_len);
+    uint8_t control = 0xff;
+    uint8_t cc = fingerprint_security_probe(data, sizeof(data), &data_len, &control);
+    // The control is the whole test. 0xE2 answering 0x00 means nothing unless an
+    // opcode that does not exist answers differently.
     const char *reading =
-        cc == 0xff ? "no_module" :
-        cc == 0x00 ? "implemented_answered" :
-        cc == 0x31 ? "implemented_wrong_level" :
-        cc == 0x2e ? "implemented_no_key" :
-        cc == 0x01 ? "not_implemented" : "unexpected";
-    int w = snprintf(line, sizeof(line), "OK FINGERPRINT_SECPROBE cc=%02x %s bytes=%u ",
-                     cc, reading, (unsigned)data_len);
+        cc == 0xff       ? "no_module" :
+        cc == control    ? "acks_anything" :
+        cc == 0x00       ? "implemented" :
+        cc == 0x31       ? "implemented_wrong_level" :
+        cc == 0x2e       ? "implemented_no_key" :
+        cc == 0x01       ? "not_implemented" : "unexpected";
+    int w = snprintf(line, sizeof(line),
+                     "OK FINGERPRINT_SECPROBE cc=%02x control=%02x %s bytes=%u ",
+                     cc, control, reading, (unsigned)data_len);
     for (uint16_t i = 0; i < data_len && w < (int)sizeof(line) - 3; i++) {
       w += snprintf(line + w, sizeof(line) - (size_t)w, "%02x", data[i]);
     }

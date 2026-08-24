@@ -160,7 +160,11 @@ uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
 //
 // Any data the module sends is written to out and must be read even if it is
 // not wanted, or the next command finds it where an acknowledgement should be.
-uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len);
+// control_cc receives the answer to an opcode that certainly does not exist. It
+// is the part that matters: a module which answers everything with the same
+// success code proves nothing by answering 0xE2 with it.
+uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len,
+                                   uint8_t *control_cc);
 
 // PS_GetChipSN: the die's unique 32-byte serial. This is what a device should
 // bind to if it is to notice its sensor being swapped — unlike the info page's

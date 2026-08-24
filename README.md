@@ -451,6 +451,7 @@ transitions between two of the eight rather than mixing them.
 | mode | behaviour |
 | --- | --- |
 | power-up | **two yellow flashes**, then the ring goes to whatever the state calls for |
+| nothing sent | the module breathes blue on its own — any gap in what we drive shows up as this |
 | pinpad | **breathes** while waiting — macOS shows no prompt, so this is the entire invitation |
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 

@@ -765,30 +765,62 @@ bool fingerprint_read_info(fp_info_t *out) {
   return true;
 }
 
-uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len) {
+// Everything the module sends inside a window, framed or not.
+//
+// read_data_stream() would be the wrong instrument for a probe: it discards
+// anything that is not a well-formed PID_DATA/PID_END packet, so "the module
+// sent nothing" and "the module sent something I refused to parse" come back
+// identically. Here the distinction is the entire result.
+static uint16_t drain_raw(uint8_t *out, uint16_t cap, uint32_t window_ms) {
+  uint16_t n = 0;
+  uint32_t deadline = now_ms() + window_ms;
+  while (n < cap) {
+    uint8_t byte = 0;
+    if (!read_byte(&byte, deadline)) break;
+    out[n++] = byte;
+  }
+  return n;
+}
+
+uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len,
+                                   uint8_t *control_cc) {
   if (out_len) *out_len = 0;
+  if (control_cc) *control_cc = 0xff;
   if (!module_present) return 0xff;
 
   // PS_GetCiphertext, to find out whether this module implements the safety
   // instruction set — the challenge-response that would make the sensor link
-  // forgeable only with a key. The manual hedges the whole set to "some
-  // fingerprint module products based on security chips", and says levels 0 and
-  // 1 do not support it.
-  //
-  // 0xE2 is the only member that is harmless if a module executes it anyway: it
-  // generates a random number and returns it. 0xE0 clears enrolled templates as
-  // its first act and 0xE1 cannot be undone, so neither is a probe.
+  // forgeable only with a key. 0xE2 is the only member that is harmless if a
+  // module executes it anyway: it generates a random number and returns it.
+  // 0xE0 clears enrolled templates as its first act and 0xE1 cannot be undone.
   uint8_t cc = exchange(INS_SEC_GET_CIPHERTEXT, NULL, 0, NULL, 0, NULL, 1000);
 
-  // 0x00 does not mean "done" for this command — it means "subsequent data
-  // packets will be sent". The stream has to be read whether or not the caller
-  // wants the bytes, because read_ack() rejects any packet that is not an
-  // acknowledgement: leaving a data packet in the pipe makes the *next* command
-  // fail with 0xfe before the link resynchronises on the one after.
+  // 0x00 means "subsequent data packets will be sent" for this command, so
+  // whatever follows has to be taken off the line either way: read_ack() rejects
+  // any packet that is not an acknowledgement, and one left in the pipe makes
+  // the *next* command fail before the link resynchronises on the one after.
   if (cc == CC_OK) {
-    uint16_t n = read_data_stream(out, cap, 1000);
+    uint16_t n = drain_raw(out, cap, 400);
     if (out_len) *out_len = n;
   }
+
+  // The control, and the reason this is worth running at all.
+  //
+  // An acknowledgement of 0x00 to 0xE2 only means something if this module can
+  // say no. Plenty of modules in this family answer every opcode they do not
+  // recognise with the same success code, and against one of those the whole
+  // safety-instruction lead is an artefact. So ask it something that certainly
+  // does not exist: 0x7F is outside every range the manual assigns, and far
+  // enough from 0xE0-0xE4 not to land in some adjacent undocumented handler.
+  //
+  // Different codes mean the module distinguishes opcodes and 0xE2 is real.
+  // Identical codes mean it acknowledges anything and 0xE2 proved nothing.
+  uint8_t control = exchange(0x7f, NULL, 0, NULL, 0, NULL, 1000);
+  if (control == CC_OK) {
+    uint8_t scratch[32];
+    drain_raw(scratch, sizeof(scratch), 200);
+  }
+  if (control_cc) *control_cc = control;
   return cc;
 }
 
@@ -816,8 +848,8 @@ bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) { (void)slot; (void)
 bool fingerprint_erase_all(void) { return false; }
 bool fingerprint_light(fp_light_t e, fp_color_t c, uint8_t n) { (void)e; (void)c; (void)n; return false; }
 bool fingerprint_random(uint32_t *out) { (void)out; return false; }
-uint8_t fingerprint_security_probe(uint8_t *o, uint16_t c, uint16_t *l) {
-  (void)o; (void)c; if (l) *l = 0; return 0xff;
+uint8_t fingerprint_security_probe(uint8_t *o, uint16_t c, uint16_t *l, uint8_t *k) {
+  (void)o; (void)c; if (l) *l = 0; if (k) *k = 0xff; return 0xff;
 }
 bool fingerprint_read_info(fp_info_t *out) { (void)out; return false; }
 bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]) { (void)out; return false; }

@@ -240,7 +240,17 @@ static void mirror_light_invalidate(void) { mirror_light_stale = true; }
 // Without it the flash would never be seen: mirror_light()'s `shown` starts
 // unset, so its first call always writes, and an idle device writes
 // STATUS_LED_OFF. The window ends on its own and the indicator takes over.
-#define BOOT_LIGHT_MS 1500
+//
+// It has to end close to when the flash does, and not a moment after. The module
+// reverts to breathing its own blue the instant a bounded effect finishes — the
+// same behaviour that made the mismatch warning below use an infinite cycle
+// count — so any slack here is not dark, it is the module's idle colour showing
+// through — breathing blue, which is the one thing the ring does entirely on its
+// own. At 1500 ms that was a second of it after two yellow flashes, reading as a
+// state the device had entered rather than as an overrun. Two flashes take about
+// 500 ms; the margin is for the module's cadence, and erring short costs a
+// truncated flash instead of a colour that means something else.
+#define BOOT_LIGHT_MS 700
 static uint32_t boot_light_until;
 
 static void mirror_light(status_led_mode_t mode) {
