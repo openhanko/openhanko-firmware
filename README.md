@@ -304,9 +304,15 @@ takes. That also removes the window the gesture cannot cover: there is never a
 period in which the device is paired and useful but unenrolled, which is the only
 period in which appropriating it would be worth anything.
 
-**Enroll at least two fingers, ideally from different hands.** There is no
-fallback: a failed sensor or an unavailable finger leaves factory reset as the
-only route, and that destroys the key.
+**One finger is enough to get going.** A device asks for one at first boot and
+stops asking once it has it. If the enrolled finger ever becomes unavailable,
+factory reset is the way back: hold the button through power-up, enrol again,
+pair again — a minute, and a complete recovery for unlocking a Mac.
+
+That recovery destroys the key, though, so it is only cheap if nothing expensive
+was bound to it. An SSH identity trusted by a fleet of hosts, or a CA-issued
+certificate, has to be re-provisioned everywhere. Enrol a second finger through
+the gate if the device is used that way.
 
 ## Identity
 

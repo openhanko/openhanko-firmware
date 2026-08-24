@@ -257,11 +257,17 @@ static void mirror_light(status_led_mode_t mode) {
 
 // How many fingers a device insists on before it considers itself set up.
 //
-// Two, because there is no fallback: the button does not authenticate, so a
-// failed sensor or an unavailable finger leaves factory reset as the only route,
-// and that destroys the key. Two fingers from different hands is the cheapest
-// insurance there is. Set to 1 to allow a single finger.
-#define ENROLL_MINIMUM 2
+// One. The argument for two was that there is no fallback if the enrolled finger
+// becomes unavailable — but factory reset is a fallback: hold the button through
+// power-up, enrol again, pair again, a minute in total. For unlocking a Mac that
+// is a complete recovery, and making every user enrol twice to avoid it costs
+// more than it saves.
+//
+// It is not free. A reset destroys the key, so anything bound to it that is
+// expensive to re-provision — an SSH identity trusted by many hosts, a
+// CA-issued certificate — has to be redone. Someone using the device that way
+// should enrol a second finger through the gate, which is what it is for.
+#define ENROLL_MINIMUM 1
 
 // Impressions per finger. Two is the floor for a template that matches
 // reliably; the module's self-learning improves it with use. One captures a
