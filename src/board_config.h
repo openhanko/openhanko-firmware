@@ -92,18 +92,18 @@
 // one. That is cost, not authentication — see THREAT-MODEL.md.
 #define FINGERPRINT_TOUCH_GPIO 6
 
-// Which level means "a finger is on the sensor".
+// Which level means "a finger is on the sensor". Active-high on the ZW111.
 //
-// UNVERIFIED. The datasheet names the pin and calls it a wake IRQ without
-// giving its polarity, and Hi-Link's protocol note is not published. Guessed
-// active-high, which is the common convention.
+// The datasheet does not say so — it names the pin, calls it a wake IRQ, and
+// leaves the level to Hi-Link's unpublished protocol note. Established by
+// reading STATUS with and without a finger on the sensor, and confirmed by every
+// authentication since: FINGERPRINT_REQUIRE_TOUCH discards a match unless this
+// line agrees at both ends of the capture, so the wrong polarity here would mean
+// nothing ever authenticates.
 //
-// A wrong guess fails closed — the device decides nothing is ever touching it
-// and refuses to authenticate — rather than open. The pin is also pulled to the
-// inactive level, so an unwired or disconnected TouchOut reads as "no finger"
-// instead of floating. Active-high is what the ZW111 does; STATUS reports the
-// line as touch=, which is how that was established and how a broken wire is
-// diagnosed.
+// That is also how a broken wire presents — closed, not open. The pin is pulled
+// to the inactive level, so an unwired or disconnected TouchOut reads as "no
+// finger" instead of floating, and STATUS reports the line as touch=.
 #define FINGERPRINT_TOUCH_ACTIVE_LEVEL 1
 
 // Whether a match is refused when the touch line disagrees.

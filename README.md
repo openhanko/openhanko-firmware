@@ -176,15 +176,19 @@ the capture. That turns forging a match from "replay bytes on RX" into "drive
 two lines in a plausible time relationship". Cost, not authentication — see
 [the sensor link](#the-sensor-link-cannot-be-authenticated).
 
-**The polarity is a guess.** The datasheet names the pin and calls it a wake IRQ
-without saying which level means touched, and Hi-Link's protocol note is not
-published. `FINGERPRINT_TOUCH_ACTIVE_LEVEL` assumes active-high. A wrong guess
-fails closed — nothing ever authenticates — rather than open, and the pin is
-pulled to the inactive level so a cut or unwired TouchOut reads as "no finger"
-instead of floating. `STATUS` reports it as `touch=up|down|unwired`, so putting
-a finger on the sensor and reading `STATUS` settles it in seconds. If it turns
-out to be inverted, flip that define; to rule the correlation out entirely while
-debugging, set `FINGERPRINT_REQUIRE_TOUCH 0`.
+**It is active-high**, which the datasheet does not say — it names the pin,
+calls it a wake IRQ, and leaves the level to the unpublished protocol note.
+Established by reading `STATUS` with and without a finger on the sensor, and
+since then by every authentication the device has performed: with
+`FINGERPRINT_REQUIRE_TOUCH 1` a match is discarded unless the line agrees at both
+ends of the capture, so a wrong polarity would mean nothing ever authenticates.
+That is also the failure mode if the wire breaks — closed, not open, helped by
+the pin being pulled to the inactive level so a cut or unwired TouchOut reads as
+"no finger" rather than floating.
+
+`STATUS` reports it as `touch=up|down|unwired`, which is where to look first if a
+board stops accepting fingers. To rule the correlation out while debugging
+something else, set `FINGERPRINT_REQUIRE_TOUCH 0`.
 
 ### Which stepping am I holding?
 
@@ -786,8 +790,7 @@ What raises cost without pretending to be authentication:
 
   Not the info page's Product SN, which the manual defines as "indicate product
   model" — it names the part, not the unit, and binding to it would detect only a
-  different *kind* of sensor. Confirm on the bench that two modules from one reel
-  differ before trusting either.
+  different *kind* of sensor. Both modules report the same one.
 - **Correlate `TouchOut`.** *Implemented.* A match is discarded unless the line
   says a finger is present, checked before the capture and again after it.
 - **Drive the full sequence.** Never trust one confirmation byte; run

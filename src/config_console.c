@@ -348,9 +348,11 @@ static void handle_command(void) {
     }
 
   } else if (strcmp(command, "FINGERPRINT_INFO_RAW") == 0) {
-    // The field offsets in fingerprint_read_info() are guessed by scanning, not
-    // documented. This prints the page so the guess can be checked against a
-    // real module — which is the whole reason it exists.
+    // The manual documents the info page's fields but not their offsets, so the
+    // ones in fingerprint_read_info() were recovered from a real module. This
+    // prints the page so they can be re-checked against another one — which is
+    // the whole reason it exists, and how the original four-byte error was
+    // found.
     uint8_t page[512];
     uint16_t len = fingerprint_read_info_page(page, sizeof(page));
     if (len == 0) {
