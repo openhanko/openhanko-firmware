@@ -766,6 +766,35 @@ finished — level 3 refuses `PS_Search`, `PS_StoreChar` and `PS_AutoEnroll`, so
 module that has neither those nor the safety set cannot verify a fingerprint at
 all. The experiment costs exactly one module and answers definitively.
 
+### Why level 3 and not level 21
+
+The ECC level looks like the stronger choice and is not, for two reasons.
+
+**It is not asymmetric where it would matter.** `PS_GetKeyt` at level 21 sends
+the *private* key to the MCU; the module keeps the public one. A search response
+is then `P` encrypted **with the public key**, which the MCU decrypts with the
+private key. Public-key encryption gives confidentiality, not authorship — and
+forging a response is exactly an encryption, so anyone holding the public key can
+do it. The public key is derivable from the private key in our flash, and it is
+also sitting in the module. That is the same exposure as AES key B, not a smaller
+one. The asymmetry would only pay if the module *signed* with a key it never
+disclosed, and that is not what the manual describes: the one signature in the
+scheme runs the other way, with the MCU signing and the module verifying.
+
+**Level 3 is specified and level 21 is not.** "Use key B to encrypt P" is one
+AES-128 operation on one 16-byte block, with the layout of `P` given to the byte.
+"Use the public key to encrypt P" names no scheme — no KDF, no padding, no point
+encoding — and the manual then gives the response as **128 bytes**, which is
+1024 bits and exactly what level 20 (RSA-1024) returns. For P-256 that number
+makes no sense, and reads as copied from the level above.
+
+That matters most for the experiment itself. We are spending a module to answer
+"does the safety set exist", and the answer has to be unambiguous. At level 3, a
+failure means the set is absent. At level 21, a failure could equally mean we
+guessed their ECIES wrong, on a module we can no longer test any other way. If
+level 3 works, a second module can settle level 21 with the existence question
+already answered.
+
 Worth doing before spending one: the module reports `model`, `sw`, `mfr` and
 `sensor` strings through `FINGERPRINT_INFO`. Hi-Link can say from those whether
 this build has the set, and which of their lines does.
