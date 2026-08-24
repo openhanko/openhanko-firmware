@@ -5,13 +5,15 @@ the device defends a compromised host well, and defends a stolen device barely a
 all.
 
 **Everything under [Today](#5-today-what-actually-gates-what) describes shipped
-behaviour, verified against the source.** Everything under
-[Planned](#7-what-each-planned-defence-buys) does not exist yet and must not be
-claimed. That separation is the point of the document: earlier drafts of our own
-README claimed a locked debug port and a `sudo` limitation that were both
-untrue, in opposite directions.
+behaviour, verified against the source**, and
+[section 7](#7-what-each-defence-buys) marks each measure as in force or not.
+Anything not marked in force must not be claimed. That discipline is the point of
+the document: earlier drafts of our own README claimed a locked debug port and a
+`sudo` limitation that were both untrue, in opposite directions.
 
-Last checked against `src/` after bring-up on RP2350 A4 with a real ZW111.
+Last checked against `src/` after the console was reduced to commands that read
+or reboot, and after `FINGERPRINT_SECPROBE` ruled out an authenticated sensor
+link on this module.
 
 ---
 
