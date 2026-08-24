@@ -811,6 +811,28 @@ something. Register 7 is not refused — and then accepts a Reserved value, acce
 a second write to a register the manual says "changes are not allowed after
 setting", and changes nothing.
 
+Those three facts have a second explanation, and the manual suggests it:
+"call the write system register `PS_WriteReg` instruction to set the encryption
+level, and then call the `PS_GetKeyt` instruction to obtain and store the secret
+key". Read as a sequence, the level is *staged* by the register write and only
+becomes real once a key exists — under which nothing is "set" yet, so `Secur
+Level` reads 0 and a second write is legal. `PS_GetCiphertext` cannot tell the
+two apart, because it needs a key that does not exist yet either.
+
+`PS_GetKeyt` can, and does:
+
+```
+FINGERPRINT_GETKEY CONFIRM  → cc=00 key_issued bytes=0
+STATUS                      → fp=1        (the template is still there)
+FINGERPRINT_INFO            → seclevel=0
+```
+
+`PS_GetKeyt` clears enrolled templates — that is its first documented act,
+unconditional and independent of anything else it does. The template survived. So
+the command acknowledged success and did not run, which is the same `0x00` an
+unimplemented opcode returns, and this time proved by the absence of a mandatory
+side effect rather than by an ambiguous reply.
+
 `seclevel` is read from offset 20 of the info page, and that offset is not a
 guess: the manual's parameter list lands on the page in its numbered order as
 consecutive 2-byte fields, which puts `Data Base Size` at 4 (the 100 the module
@@ -818,11 +840,15 @@ reports), the device address at 8, packet size at 12, the baud coefficient at 14
 (×9600 = the rate it answers on), `Secur Level` at 20, and the table flag at 126
 holding the documented `0x1234`. Six anchors agreeing on one layout.
 
-**So the encryption levels are not implemented here.** Register 7 is accepted by
-a range check and wired to nothing, which is also why the safety instruction set
-answers exactly like an unimplemented opcode — the two findings are the same
-finding. Nothing was lost: at level 0 the module keeps `PS_Search`,
-`PS_StoreChar` and `PS_AutoEnroll`, so it still verifies fingerprints normally.
+**So the safety instruction set is not implemented on this firmware**, on three
+independent readings: `0xE2` is indistinguishable from the nonexistent `0x7F`,
+register 7 accepts anything and never changes `Secur Level`, and `0xE0`
+acknowledges success without performing the one thing it cannot skip.
+
+Nothing was lost finding that out. The module still reads `fp=1`, `seclevel=0`
+and `antifake=1`, keeps `PS_Search`, `PS_StoreChar` and `PS_AutoEnroll`, and
+verifies fingerprints normally. The experiment that looked like it would cost a
+module cost nothing.
 
 That closes it for these modules. What remains is a module from a line that has
 the security chip, and this one identifies itself well enough to ask Hi-Link
