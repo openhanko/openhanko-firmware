@@ -195,10 +195,10 @@ static void handle_command(void) {
     if (fingerprint_read_info(&info)) {
       snprintf(line, sizeof(line),
                "OK FINGERPRINT_INFO model=\"%s\" sw=\"%s\" mfr=\"%s\" sensor=\"%s\" "
-               "addr=%08lx capacity=%u baud=%lu seclevel=%u pwd=%08lx table=%04x",
+               "addr=%08lx capacity=%u baud=%lu antifake=%u seclevel=%u pwd=%08lx table=%04x",
                info.product_model, info.sw_version, info.manufacturer, info.sensor_name,
                (unsigned long)info.device_address, info.capacity,
-               (unsigned long)info.baud, info.security_level,
+               (unsigned long)info.baud, info.anti_fake, info.security_level,
                (unsigned long)info.password, info.table_flag);
       send_line(line);
     } else {

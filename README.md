@@ -828,6 +828,21 @@ That closes it for these modules. What remains is a module from a line that has
 the security chip, and this one identifies itself well enough to ask Hi-Link
 directly: `model="XS-F2 SO" sw="Ver 5.01" mfr=" FPPASS" sensor="ICNF7352"`.
 
+One thing the same re-read did turn up, in the module's favour. Parameter 8,
+`ResSpitefullmg`, is anti-fake fingerprint detection — "used to prevent false
+fingerprints from merging into fingerprint templates" — with a reset value of 1
+and marked read-only. It reads 1 here, so it is on from the factory and cannot be
+turned off, by us or by anyone else. `FINGERPRINT_INFO` reports it as
+`antifake=`.
+
+That defends a different attack from the one the safety set would have: a lifted
+print or a moulded finger presented to the sensor, rather than a forged answer on
+the wire. It is worth knowing we have it, and worth not overstating — the vendor
+documents no detail about what the check does or how well.
+
+Its offset is the seventh anchor on the page layout: parameter 8 lands at 16 and
+reads exactly the documented reset value.
+
 Meanwhile a PIN mixed into the key-wrapping KDF closes the same attack without
 depending on any of this — see
 [THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered).

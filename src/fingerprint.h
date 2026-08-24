@@ -132,6 +132,8 @@ typedef struct {
   uint32_t device_address;   // 0xFFFFFFFF from the factory
   uint16_t capacity;         // templates the module can hold
   uint32_t baud;             // already multiplied out
+  uint16_t anti_fake;        // 1 from the factory, and read-only: the module
+                             // refuses to merge a fingerprint it judges false
   uint16_t security_level;   // 0 = safety instruction set unavailable
   uint32_t password;         // readable, which is why it is not a secret
   uint16_t table_flag;       // 0x1234 once the parameter table is initialised

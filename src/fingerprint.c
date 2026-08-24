@@ -753,6 +753,7 @@ bool fingerprint_read_info(fp_info_t *out) {
   out->device_address  = rd32(page, 8);
   out->capacity        = rd16(page, 4);
   out->baud            = (uint32_t)rd16(page, 14) * 9600u;
+  out->anti_fake       = rd16(page, 16);
   out->security_level  = rd16(page, 20);
   out->password        = rd32(page, 60);
   out->table_flag      = rd16(page, 126);
