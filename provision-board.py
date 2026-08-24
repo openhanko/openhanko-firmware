@@ -67,6 +67,26 @@ def in_bootsel(pt: str) -> bool:
     return subprocess.run([pt, "info"], capture_output=True).returncode == 0
 
 
+def need_bootsel(pt: str) -> None:
+    """Gets the board into BOOTSEL, asking for hands if necessary.
+
+    There is no way to do this from here. picotool can reboot a device it can
+    already talk to, but the firmware deliberately exposes no picotool vendor
+    interface — the USB interfaces belong to the smart card — so a running board
+    cannot be sent to the bootloader by software. Earlier this waited for a
+    BOOTSEL it had no means of causing, which reads as a hang.
+    """
+    if in_bootsel(pt):
+        return
+    print()
+    print("  >>> put the board in BOOTSEL: double-tap RESET, or hold BOOT while replugging")
+    print("  >>> waiting...", end="", flush=True)
+    if not wait_for(lambda: in_bootsel(pt), 300):
+        raise Abort("gave up waiting for BOOTSEL")
+    print(" got it")
+    print()
+
+
 def wait_for(predicate, seconds: int) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
@@ -129,12 +149,24 @@ def main() -> None:
     if not in_bootsel(pt):
         raise Abort("put the board in BOOTSEL first (hold BOOT while plugging in)")
     rows = otp_rows(pt, tmp)
-    if rows[0x04b] & 0xffff:
-        raise Abort(f"BOOT_FLAGS1 is already 0x{rows[0x04b]:06x} — this board is not fresh. "
-                    "Provisioning is not resumable: use a board with nothing burned.")
-    if rows[0x038] & 0xffff or rows[0x040] & 0xffff:
-        raise Abort("CRIT0/CRIT1 already set — this board is not fresh")
-    say("board is fresh", "no keys, no flags, no locks")
+    flags1, crit1 = rows[0x04b], rows[0x040]
+    lock4 = rows[0xf89]
+    done_keys = bool(flags1 & 0xf)
+    done_tap = bool(flags1 & (1 << 19))
+    done_lock = bool(lock4 & 0xffffff)
+    done_secure = bool(crit1 & 1)
+    done_debug = bool(crit1 & 4)
+
+    # Resumable by inspection rather than by a flag. A run that stops partway
+    # leaves a board in a real state, and the only safe way to continue is to
+    # read what that state is — a --resume flag would be the operator asserting
+    # it, which is the thing that goes wrong at 2am.
+    if done_debug:
+        raise Abort("debug is already disabled — this board is finished")
+    if done_keys:
+        say("resuming", f"BOOT_FLAGS1=0x{flags1:06x} CRIT1=0x{crit1:06x}")
+    else:
+        say("board is fresh", "no keys, no flags, no locks")
 
     # ---- 2. firmware first, so there is something to boot ------------------
     #
@@ -145,10 +177,17 @@ def main() -> None:
     if commit:
         run(pt, "load", signed)
     say("flashed signed firmware", os.path.basename(signed))
+    if not done_tap and "double_tap" not in json.dumps(expect.get("boot_flags1", {})):
+        raise Abort("stage1-keys.json has no double_tap — it predates the bootrom "
+                    "recovery. Re-run bootkeys.py before provisioning, or the board "
+                    "loses its way back in the moment secure boot is enabled.")
 
     # ---- 3. keys and the bootrom's recovery, before anything requires them --
-    burn(pt, stage1, commit)
-    say("burned boot keys + double-tap")
+    if done_keys and done_tap:
+        say("keys already burned", "skipping")
+    else:
+        burn(pt, stage1, commit)
+        say("burned boot keys + double-tap")
 
     if commit:
         # Still in the bootloader from step 2, so the readback needs no detour.
@@ -183,21 +222,24 @@ def main() -> None:
         say("would boot and wait", "for otp=set and keys=loaded")
 
     # ---- 5. seal the secret away -------------------------------------------
+    need_bootsel(pt) if commit else None
     lock = os.path.join(outdir, "lock-otp-secret.json")
     if not os.path.exists(lock):
         with open(lock, "w") as f:
             json.dump({"page4_lock1": {"lock_s": 1, "lock_ns": 3, "lock_bl": 3}}, f, indent=4)
             f.write("\n")
-    if commit:
-        if not wait_for(lambda: in_bootsel(pt), 30):
-            run(pt, "reboot", "-u", check=False)
-            wait_for(lambda: in_bootsel(pt), 30)
-    burn(pt, lock, commit)
-    say("locked the secret's page", "secure read-only, bootloader shut out")
+    if done_lock:
+        say("secret's page already locked", "skipping")
+    else:
+        burn(pt, lock, commit)
+        say("locked the secret's page", "secure read-only, bootloader shut out")
 
     # ---- 6. require signatures ---------------------------------------------
-    burn(pt, stage2, commit)
-    say("enabled secure boot")
+    if done_secure:
+        say("secure boot already on", "skipping")
+    else:
+        burn(pt, stage2, commit)
+        say("enabled secure boot")
 
     if commit:
         run(pt, "load", "-x", signed, check=False)
@@ -215,9 +257,7 @@ def main() -> None:
             json.dump({"crit1": {"debug_disable": 1, "secure_debug_disable": 1}}, f, indent=4)
             f.write("\n")
     if commit:
-        if not wait_for(lambda: in_bootsel(pt), 30):
-            run(pt, "reboot", "-u", check=False)
-            wait_for(lambda: in_bootsel(pt), 30)
+        need_bootsel(pt)
     burn(pt, dbg, commit)
     say("disabled debug", "SWD is gone; BOOTSEL and picotool remain")
 
