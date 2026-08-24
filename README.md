@@ -334,7 +334,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `FINGERPRINT_PROBE` | re-run the link probe and report what answered |
 | `FINGERPRINT_INFO` | model, firmware, manufacturer, sensor name |
 | `FINGERPRINT_SN` | the module's per-die serial — what binding is against |
-| `FINGERPRINT_SECPROBE` | whether this module implements the safety instruction set |
+| `FINGERPRINT_SECPROBE` | whether this module implements the safety instruction set, and what it returns |
 | `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
 | `OTP_STATUS` | whether the device holds a secret, and which one, by hash |
 | `AID_MODE standard\|pinpad` | force the AID mode instead of letting the probe decide |
@@ -709,16 +709,22 @@ where the firmware can read them. That is the standing gap, not a new one.
 
 ### What is unresolved
 
-- **Whether the ZW111 supports any of it.** The manual covers Hi-Link's whole
-  range and says only that "some fingerprint module products based on security
-  chips" have the set. Both modules here report `SecurLevel 0`.
-  `FINGERPRINT_SECPROBE` settles it without writing anything: it sends
-  `PS_GetCiphertext` and reports the raw confirmation code. `0x31` (wrong level)
-  or `0x2e` (no key) mean the opcode is implemented; `0x01` means it is not.
-  `0xE2` is the safe member to send — `0xE0` clears templates and `0xE1` is
-  irreversible.
+- **Whether the ZW111 supports any of it.** Answered, and better than expected:
+  `FINGERPRINT_SECPROBE` sends `PS_GetCiphertext` and the module replies `0x00`
+  — which for this command means "subsequent data packets will be sent", the
+  documented success path. **The set is implemented, and it answered at
+  `SecurLevel 0`**, which the manual says should not happen: levels 0 and 1 are
+  listed as not supporting the safety set at all.
+
+  That reopens a better question than the one it closed. If the set works at
+  level 0, `PS_SecuritySearch` may be usable *alongside* the ordinary commands,
+  and the whole cost of moving to level 3 — losing `PS_AutoEnroll`, rebuilding
+  enrolment — may not have to be paid at all. What decides it is whether
+  `PS_GetKeyt` also answers at level 0. That one clears enrolled templates as
+  its first act, so it is a spare-module experiment.
 - **The level is one-way.** "Changes are not allowed after setting." A module set
-  to a level whose protocol we cannot implement is finished.
+  to a level whose protocol we cannot implement is finished — and if the set
+  works at level 0, there may be no reason to set one.
 - **Which level.** 3 (AES-128) is the one to want: mbedTLS already has AES, SM4
   is not in it at all, 3DES at level 4 is weak, and levels 20 and 21 return
   128-byte responses on a protocol the manual describes inconsistently.

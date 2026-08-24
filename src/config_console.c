@@ -233,14 +233,20 @@ static void handle_command(void) {
   } else if (strcmp(command, "FINGERPRINT_SECPROBE") == 0) {
     // Read-only, and the answer decides whether the sensor link can ever be
     // authenticated on this part. See fingerprint_security_probe().
-    uint8_t cc = fingerprint_security_probe();
+    uint8_t data[64];
+    uint16_t data_len = 0;
+    uint8_t cc = fingerprint_security_probe(data, sizeof(data), &data_len);
     const char *reading =
         cc == 0xff ? "no_module" :
-        cc == 0x31 ? "supported_wrong_level" :
-        cc == 0x2e ? "supported_no_key" :
+        cc == 0x00 ? "implemented_answered" :
+        cc == 0x31 ? "implemented_wrong_level" :
+        cc == 0x2e ? "implemented_no_key" :
         cc == 0x01 ? "not_implemented" : "unexpected";
-    snprintf(line, sizeof(line), "OK FINGERPRINT_SECPROBE cc=%02x %s seclevel_from=INFO",
-             cc, reading);
+    int w = snprintf(line, sizeof(line), "OK FINGERPRINT_SECPROBE cc=%02x %s bytes=%u ",
+                     cc, reading, (unsigned)data_len);
+    for (uint16_t i = 0; i < data_len && w < (int)sizeof(line) - 3; i++) {
+      w += snprintf(line + w, sizeof(line) - (size_t)w, "%02x", data[i]);
+    }
     send_line(line);
 
   } else if (strcmp(command, "FINGERPRINT_SN") == 0) {

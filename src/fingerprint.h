@@ -153,10 +153,14 @@ uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
 // Asks whether this module implements the safety instruction set at all, by
 // issuing one member of it and returning the raw confirmation code.
 //
-// 0x31 (wrong encryption level) or 0x2e (no key yet) mean the module knows the
-// opcode, so an authenticated link is reachable on this part. 0x01 means it does
-// not. 0xff means no module answered.
-uint8_t fingerprint_security_probe(void);
+// 0x00 means the module accepted it and is sending a data stream, which for
+// this command is the documented success path — the set is implemented. 0x31
+// (wrong encryption level) or 0x2e (no key yet) also mean the opcode is known.
+// 0x01 means it is not. 0xff means no module answered.
+//
+// Any data the module sends is written to out and must be read even if it is
+// not wanted, or the next command finds it where an acknowledgement should be.
+uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len);
 
 // PS_GetChipSN: the die's unique 32-byte serial. This is what a device should
 // bind to if it is to notice its sensor being swapped — unlike the info page's

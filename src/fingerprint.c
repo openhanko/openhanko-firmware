@@ -765,27 +765,31 @@ bool fingerprint_read_info(fp_info_t *out) {
   return true;
 }
 
-uint8_t fingerprint_security_probe(void) {
+uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len) {
+  if (out_len) *out_len = 0;
   if (!module_present) return 0xff;
-  // PS_GetCiphertext at encryption level 0, purely to read the refusal.
+
+  // PS_GetCiphertext, to find out whether this module implements the safety
+  // instruction set — the challenge-response that would make the sensor link
+  // forgeable only with a key. The manual hedges the whole set to "some
+  // fingerprint module products based on security chips", and says levels 0 and
+  // 1 do not support it.
   //
-  // The manual describes a safety instruction set — a challenge-response that
-  // would make the sensor link forgeable only with a key — but hedges it to
-  // "some fingerprint module products based on security chips", and both modules
-  // here report SecurLevel 0. Whether a ZW111 has it at all is the one fact the
-  // whole design depends on, and this is the cheapest way to learn it: a module
-  // that implements the set knows the opcode and refuses it for the level
-  // (0x31), or reports that no key exists yet (0x2e). One that does not
-  // implement it cannot recognise the instruction and answers 0x01.
-  //
-  // 0xE2 specifically, because it is the only member of the set that is harmless
-  // if a module executes it anyway: it generates a random number and encrypts
-  // it. 0xE0 clears enrolled templates as its first act, and 0xE1 is
-  // irreversible.
-  uint8_t payload[32];
-  uint8_t payload_len = 0;
-  return exchange(INS_SEC_GET_CIPHERTEXT, NULL, 0, payload, sizeof(payload),
-                  &payload_len, 1000);
+  // 0xE2 is the only member that is harmless if a module executes it anyway: it
+  // generates a random number and returns it. 0xE0 clears enrolled templates as
+  // its first act and 0xE1 cannot be undone, so neither is a probe.
+  uint8_t cc = exchange(INS_SEC_GET_CIPHERTEXT, NULL, 0, NULL, 0, NULL, 1000);
+
+  // 0x00 does not mean "done" for this command — it means "subsequent data
+  // packets will be sent". The stream has to be read whether or not the caller
+  // wants the bytes, because read_ack() rejects any packet that is not an
+  // acknowledgement: leaving a data packet in the pipe makes the *next* command
+  // fail with 0xfe before the link resynchronises on the one after.
+  if (cc == CC_OK) {
+    uint16_t n = read_data_stream(out, cap, 1000);
+    if (out_len) *out_len = n;
+  }
+  return cc;
 }
 
 bool fingerprint_random(uint32_t *out) {
@@ -812,7 +816,9 @@ bool fingerprint_enroll(uint16_t slot, uint32_t timeout_ms) { (void)slot; (void)
 bool fingerprint_erase_all(void) { return false; }
 bool fingerprint_light(fp_light_t e, fp_color_t c, uint8_t n) { (void)e; (void)c; (void)n; return false; }
 bool fingerprint_random(uint32_t *out) { (void)out; return false; }
-uint8_t fingerprint_security_probe(void) { return 0xff; }
+uint8_t fingerprint_security_probe(uint8_t *o, uint16_t c, uint16_t *l) {
+  (void)o; (void)c; if (l) *l = 0; return 0xff;
+}
 bool fingerprint_read_info(fp_info_t *out) { (void)out; return false; }
 bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]) { (void)out; return false; }
 uint16_t fingerprint_read_info_page(uint8_t *o, uint16_t c) { (void)o; (void)c; return 0; }
