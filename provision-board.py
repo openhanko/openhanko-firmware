@@ -137,8 +137,13 @@ def main() -> None:
     say("board is fresh", "no keys, no flags, no locks")
 
     # ---- 2. firmware first, so there is something to boot ------------------
+    #
+    # Deliberately without -x. That flag starts the application, and everything
+    # in the next two steps needs the board still sitting in the bootloader —
+    # picotool answers "rebooting" to an OTP write aimed at a device that has
+    # just been told to run.
     if commit:
-        run(pt, "load", "-x", signed)
+        run(pt, "load", signed)
     say("flashed signed firmware", os.path.basename(signed))
 
     # ---- 3. keys and the bootrom's recovery, before anything requires them --
@@ -146,11 +151,7 @@ def main() -> None:
     say("burned boot keys + double-tap")
 
     if commit:
-        if not wait_for(lambda: in_bootsel(pt), 30):
-            # the board is running the firmware; that is fine, but the readback
-            # needs it back in the bootloader
-            run(pt, "reboot", "-u", check=False)
-            wait_for(lambda: in_bootsel(pt), 30)
+        # Still in the bootloader from step 2, so the readback needs no detour.
         rows = otp_rows(pt, tmp)
         got0, got1 = key_at(rows, 0x080), key_at(rows, 0x090)
         if got0 != want0:
