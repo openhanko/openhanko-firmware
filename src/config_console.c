@@ -10,6 +10,7 @@
 #include "pico/bootrom.h"
 #include "pico/stdlib.h"
 #include "fingerprint.h"
+#include "otp.h"
 #include "identity.h"
 #include "piv.h"
 #include "settings.h"
@@ -152,7 +153,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     int status_len = snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
+             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x pairing=%s config=%s aid=%s claimed=%s boothold=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
              // What can authorise a signature. Without a sensor nothing can:
              // the button configures the device and never authenticates it.
@@ -171,6 +172,7 @@ static void handle_command(void) {
              fingerprint_status_text(),
              !fingerprint_touch_wired() ? "unwired"
                                         : (fingerprint_touch_asserted() ? "down" : "up"),
+             otp_secret_present() ? "set" : "none",
              (unsigned)fingerprint_boot_rx_bytes(),
              fingerprint_boot_saw_hello() ? "hello" : "nohello",
              (unsigned)fingerprint_line_high(false), (unsigned)fingerprint_line_edges(false),
@@ -281,6 +283,38 @@ static void handle_command(void) {
     } else {
       send_line("ERR FINGERPRINT_INFO");
     }
+
+  } else if (strcmp(command, "OTP_STATUS") == 0) {
+    uint32_t chipid = 0;
+    bool readable = otp_selftest(&chipid);
+    char fp[16];
+    if (otp_secret_fingerprint(fp, sizeof(fp))) {
+      snprintf(line, sizeof(line), "OK OTP_STATUS readable=%s chipid=%08lx secret=set id=%s",
+               readable ? "yes" : "no", (unsigned long)chipid, fp);
+    } else {
+      snprintf(line, sizeof(line), "OK OTP_STATUS readable=%s chipid=%08lx secret=none",
+               readable ? "yes" : "no", (unsigned long)chipid);
+    }
+    send_line(line);
+
+  } else if (strcmp(command, "OTP_PROVISION") == 0) {
+    // Burns a device secret into OTP. There is no undo, no erase and no second
+    // attempt: the page is consumed whatever the outcome. So it costs a press,
+    // like every other irreversible thing here, and it refuses outright if the
+    // page already holds something.
+    if (otp_secret_present()) {
+      send_line("ERR OTP_PROVISION already_provisioned");
+      return;
+    }
+    if (!demand_button_press()) return;
+    if (!otp_secret_provision()) {
+      send_line("ERR OTP_PROVISION");
+      return;
+    }
+    char fp2[16];
+    otp_secret_fingerprint(fp2, sizeof(fp2));
+    snprintf(line, sizeof(line), "OK OTP_PROVISION id=%s", fp2);
+    send_line(line);
 
   } else if (strcmp(command, "FINGERPRINT_PROBE") == 0) {
     bool ok = fingerprint_probe();

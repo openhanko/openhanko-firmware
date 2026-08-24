@@ -22,6 +22,7 @@ if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/secrets.h")
 endif()
 
 add_executable(openhanko
+  otp.c
   main.c
   button.c
   config_console.c
@@ -43,6 +44,7 @@ target_include_directories(openhanko PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 pico_generate_pio_header(openhanko ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
 target_link_libraries(openhanko
+  pico_bootrom
   pico_stdlib
   pico_unique_id
   pico_rand
