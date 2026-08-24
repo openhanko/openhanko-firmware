@@ -201,27 +201,15 @@ directory caches it, so a missing SDK only surfaces on a clean checkout.
 
 ## The button does not authenticate
 
-A fingerprint match is the only thing that authorises a signature over PIV. The
-button's jobs are configuration: the factory reset gesture, opening enrolment,
-and unlocking the configuration console.
+A fingerprint match is the only thing that authorises a signature. The button's
+jobs are all configuration: the factory reset gesture, opening enrolment, and
+unlocking `BOOTLOADER`. No build flag changes this and no console command signs,
+so a unit with no sensor fitted cannot authenticate at all — which is the correct
+failure.
 
-There is no build in which the first part is untrue. There was briefly a flag for
-bench boards with no sensor fitted, and it is gone — a switch whose only function
-is to restore press-to-authenticate is a switch someone eventually ships.
-Removing the sensor from a unit now yields a device that cannot authenticate at
-all, which is the correct failure.
-
-`PAIRING_MODE` used to be the exception — a button press bought 120 seconds of
-signing on both 9A and 9D, without even going through `CONFIG_UNLOCK`. It is
-gone, along with every other console command that could reach a key or a
-template. Nothing on the console signs, enrols, erases or provisions any more,
-so the fingerprint is now the only thing that authorises a signature by any
-route.
-
-`CONFIG_UNLOCK` still asks for a press rather than a match. What it gates is
-`BOOTLOADER`, which reboots into the ROM bootloader — on a locked unit that
-still only accepts signed firmware, so the press buys an update path, not a
-key.
+`CONFIG_UNLOCK` does ask for a press rather than a match. What it gates is
+`BOOTLOADER`, and a locked unit still accepts only signed firmware, so the press
+buys an update path rather than a key.
 
 ## Enrolling a finger
 
@@ -292,17 +280,13 @@ entropy source is not.
 
 ### There is no other way to load one
 
-There were two: a staged upload over the console, and `secrets.h`, which baked
-PEMs into the firmware image. Both are gone, along with `PROVISION_BEGIN` /
-`PROVISION_CHUNK` / `PROVISION_COMMIT` and the compiled-key path in `piv.c`.
+Nothing can put a key on the device from outside: no console command, and no
+build that bakes PEMs into the image. `STATUS` reports `source=flash` or
+`source=none` and there is no third answer, so "the private key never existed
+off this chip" describes the device rather than how it was set up.
 
-They were bench conveniences, and each of them made "the private key never
-existed off this chip" a claim about a *configuration* rather than about the
-device. Removing them makes it unconditional: `STATUS` reports `source=flash`
-or `source=none`, and there is no third answer.
-
-`./provision.py` is still stdlib-only — no pip install, no venv — and now only
-inspects and pairs.
+`./provision.py` is stdlib-only — no pip install, no venv — and only inspects
+and pairs.
 
 ### Factory reset
 
@@ -495,17 +479,15 @@ signing path entirely.
 
 ### EC keys must use named-curve encoding
 
-`MBEDTLS_PK_PARSE_EC_EXTENDED` is deliberately not enabled, so mbedTLS accepts
-only named-curve EC keys and rejects explicit parameters — field type, prime,
-generator, the lot — with `MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE` (`-0x4E80`).
+`MBEDTLS_PK_PARSE_EC_EXTENDED` is deliberately not enabled, so mbedTLS rejects
+explicit EC parameters — field type, prime, generator, the lot — with
+`MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE` (`-0x4E80`). `mbedtls_pk_write_key_pem()`
+in `identity.c` writes named-curve, which is what real PIV cards carry and is
+135 bytes against 377.
 
-That costs nothing now: `mbedtls_pk_write_key_pem()` in `identity.c` writes
-named-curve, which is also what real PIV cards carry and is 135 bytes against
-377. It cost a day when keys still came from the host, because LibreSSL's
-`openssl req -newkey ec` writes explicit parameters by default and the failure
-mode is confusing — the certificate decodes, the card enumerates, macOS reads
-the identity, and only signing fails. `STATUS` reports `alg=` and `keyrc=`, so
-if it ever recurs it is one command away from a diagnosis.
+Worth knowing because the failure mode is confusing: the certificate decodes,
+the card enumerates, macOS reads the identity, and only signing fails. `STATUS`
+reports `alg=` and `keyrc=`.
 
 ### Omitting `MBEDTLS_PEM_PARSE_C` fails the same way
 
