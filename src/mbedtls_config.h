@@ -17,6 +17,16 @@
 
 #define MBEDTLS_MD_C
 #define MBEDTLS_SHA256_C
+
+// AES-GCM, for wrapping key material at rest under the OTP secret.
+//
+// GCM rather than a bare cipher because the tag is what makes a bad decrypt
+// legible. Without it, storage that has been corrupted or tampered with decrypts
+// to plausible-looking bytes that mbedTLS then tries to parse as a PEM key, and
+// the failure arrives as a parse error about the wrong thing entirely.
+#define MBEDTLS_AES_C
+#define MBEDTLS_GCM_C
+#define MBEDTLS_CIPHER_C
 // SHA-1 only to fingerprint public keys for the device label. macOS derives
 // kSecAttrApplicationLabel — the hash sc_auth pairs against — the same way, so
 // the name on the device matches the entry in `sc_auth list`. Nothing is signed

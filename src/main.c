@@ -544,6 +544,24 @@ int main(void) {
   // compiled into secrets.h, is left alone. Otherwise every developer build
   // would silently replace the identity their Mac is already paired with.
   if (!piv_has_identity()) {
+    // The identity is wrapped with the device secret, so there has to be one
+    // before there can be a key to store. Provisioning it here is the one moment
+    // where burning an OTP page is unambiguously right: this device has no
+    // identity, is about to acquire the only one it will ever have without a
+    // factory reset, and cannot keep it otherwise.
+    //
+    // Only ever once. A device that already holds a secret keeps it — including
+    // through a factory reset, which destroys the identity in flash and cannot
+    // touch OTP — so the next identity is wrapped with the same secret.
+    if (!otp_secret_present()) {
+      if (otp_secret_provision()) {
+        printf("main: burned a device secret into OTP\n");
+        config_console_send_line("EVENT OTP_PROVISIONED");
+      } else {
+        printf("main: no device secret and could not make one; identity not stored\n");
+        config_console_send_line("EVENT OTP_FAILED");
+      }
+    }
     if (identity_generate()) piv_reload_keys();
   }
   config_console_init();
