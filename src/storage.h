@@ -9,9 +9,10 @@
 // levelling and no journal: this is written once during provisioning and read
 // at every boot, so a log-structured store would be complexity for nothing.
 //
-// The keys are stored in plaintext. There is no flash encryption
-// to lose — see README.md on why that is a smaller downgrade than it sounds
-// for a presence-gated device.
+// The record is encrypted with AES-256-GCM under a key derived from the
+// device's OTP secret, so a flash reader recovers ciphertext and a tag rather
+// than four PEMs. See otp.h for why that is worth nothing without secure boot
+// and a fused debug port, and worth a great deal with them.
 
 typedef enum {
   STORAGE_CERT_9A = 0,

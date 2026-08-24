@@ -23,10 +23,14 @@ token driver, reads the certificate, pairs it to the account, and authenticates
 names itself after that key, and can erase itself back to factory state without
 a host.
 
-Not done:
+The sensor, the enrolment gesture, module binding, encryption at rest, secure
+boot and debug lockout are all working on hardware. What is left:
 
-- Nothing. The sensor, the enrolment gesture, module binding, encryption at
-  rest, secure boot and debug lockout are all working on hardware.
+- `CONFIG_UNLOCK` still opens its window on a button press rather than a
+  fingerprint, and that window includes `PAIRING_MODE` — see
+  [the button does not authenticate](#the-button-does-not-authenticate).
+- There is no real PIN, so a stolen device is worth what its credentials are
+  worth. [THREAT-MODEL.md](THREAT-MODEL.md) says how far that goes.
 - The custom RP2354A boards are at fab; development is on an RP2350-Zero.
 
 ## Compared with tinyTouch
@@ -49,7 +53,7 @@ Measured against `firmware/tiny_touch_smartcard` as of August 2026.
 | where the key comes from | provisioned from a host, or compiled into the image | **generated on the device at first boot**; both host paths kept as alternatives |
 | does the private key exist off-device | yes — on whatever machine generated it | no, on the generate-on-device path |
 | slot 9D key agreement | not implemented | ECDH P-256, dynamic auth tag `0x85` |
-| pinpad PIN entry | not implemented | `bPINSupport` declared and `PC_to_RDR_Secure` answered from a press |
+| pinpad PIN entry | not implemented | `bPINSupport` declared and `PC_to_RDR_Secure` answered from a fingerprint |
 | AIDs answered | standard PIV only | standard PIV **and** a private AID |
 | driver detection | none | private-AID probe: the device works out for itself whether its driver is installed, and switches mode both ways |
 | host software | Python LaunchAgent, AES/HMAC over HID | signed and notarised CryptoTokenKit extension |
@@ -84,7 +88,7 @@ focus. That works with nothing installed, which is genuinely the right default.
 But it caps the experience there: HID typing cannot be better than the focused
 window, and macOS frequently does not focus its own authorization dialog. Adding
 a private AID as a *probe* gets both — untouched Mac, `pivtoken` binds, PIN typed;
-driver present, our extension binds and the press alone signs with no dialog at
+driver present, our extension binds and a finger alone signs with no dialog at
 all. Neither mode needs the user to choose.
 
 **P-256 was forced, then turned out to matter.** The ESP32-S3 has a big-integer
@@ -262,14 +266,23 @@ directory caches it, so a missing SDK only surfaces on a clean checkout.
 
 ## The button does not authenticate
 
-A fingerprint match is the only thing that authorises a signature. The button has
-two jobs, both configuration: the factory reset gesture, and opening enrolment.
+A fingerprint match is the only thing that authorises a signature over PIV. The
+button's jobs are configuration: the factory reset gesture, opening enrolment,
+and unlocking the configuration console.
 
-There is no build in which that is untrue. There was briefly a flag for bench
-boards with no sensor fitted, and it is gone — a switch whose only function is to
-restore press-to-authenticate is a switch someone eventually ships. Removing the
-sensor from a unit now yields a device that cannot authenticate at all, which is
-the correct failure.
+There is no build in which the first part is untrue. There was briefly a flag for
+bench boards with no sensor fitted, and it is gone — a switch whose only function
+is to restore press-to-authenticate is a switch someone eventually ships.
+Removing the sensor from a unit now yields a device that cannot authenticate at
+all, which is the correct failure.
+
+**The console unlock is the loose end.** `CONFIG_UNLOCK` waits on the button
+rather than on a match, and the 120-second window it opens includes
+`PAIRING_MODE`, which makes slot 9A sign on demand. So there is one route to a
+signature that a press alone reaches — over CDC, from a host, with somebody
+standing at the device. It is tracked as the first item in
+[THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered) rather than described as
+something the design intends.
 
 ## Enrolling a finger
 
@@ -285,7 +298,7 @@ marks intent; the finger authorises it. Then lift, and present the new finger.
 | --- | --- |
 | click, finger matches | two green flashes, then breathing purple |
 | click, finger does not match | one long red flash, nothing opens |
-| click, no finger | nothing — the button alone does not authenticate |
+| click, no finger | nothing — the click alone does not authenticate |
 | waiting for the new finger, 30 s | breathing purple |
 | enrolled | steady green |
 | timed out or failed | steady red, nothing stored |
@@ -383,7 +396,7 @@ Measured: `OpenHanko #539755` → gesture → `OpenHanko #FA764A`, `source=flash
 ./provision.py ports        # find the device
 ./provision.py status       # what does it know?
 ./provision.py pair         # link it to your macOS account
-sudo -k && sudo -v          # test: press the button when macOS asks for the PIN
+sudo -k && sudo -v          # test: touch the sensor when macOS asks for the PIN
 ```
 
 macOS usually offers to pair on its own when the card is inserted; the "Unpaired
@@ -392,7 +405,7 @@ identity hash out of `sc_auth identities` and prints the `sudo sc_auth pair`
 command to run, or runs it with `--run`.
 
 `./provision.py monitor` prints device events live, which is the fastest way to
-tell whether a press registered.
+tell whether a touch registered.
 
 ## Console commands
 
@@ -409,7 +422,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `ENROLL <n>` / `FINGERPRINT_ERASE` | fingerprint template management |
 | `FINGERPRINT_INFO` | module serial, firmware, manufacturer, sensor name |
 | `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
-| `PAIRING_MODE` / `PAIRING_MODE_OFF` | sign without a press, for pairing flows |
+| `PAIRING_MODE` / `PAIRING_MODE_OFF` | sign without a finger, for pairing flows |
 | `AID_MODE standard\|pinpad` | force the AID mode instead of letting the probe decide |
 | `BOOTLOADER` | reboot to USB mass-storage bootloader |
 | `REBOOT`, `USB_RECONNECT` | as named |
@@ -428,13 +441,13 @@ across reboots.
 standard mode        answers the PIV AID  +  the private AID as a probe
   (factory default)          │
   Apple's pivtoken binds     │  our driver SELECTs the private AID —
-  the press types the PIN    │  nothing else knows to ask for it
+  a touch types the PIN      │  nothing else knows to ask for it
                              ▼
                    persist pinpad, reboot
                              │
 pinpad mode                  ▼
   answers the private     our driver binds exclusively;
-  AID only                the press alone signs, LED breathing
+  AID only                a touch alone signs, LED breathing
                              │
                              │  no private-AID select within 10 s
                              │  of the host first speaking
@@ -449,9 +462,9 @@ All four transitions measured on hardware:
 
 | behaviour | evidence |
 | --- | --- |
-| driverless by default | `aid=standard`, `pivtoken` binds, 580 ms press→signature |
+| driverless by default | `aid=standard`, `pivtoken` binds, touch→signature with nothing installed |
 | upgrades on meeting its driver | forced to standard; back to `aid=pinpad claimed=yes` in under four seconds, unattended |
-| pinpad authenticates | `sudo` on a press, no PIN typed |
+| pinpad authenticates | `sudo` on a touch, no PIN typed |
 | reverts when the driver is gone | `aid=pinpad claimed=yes` → nothing registered → `aid=standard claimed=no` |
 
 **Answering both AIDs is safe only because the state is transient.** macOS binds
@@ -471,9 +484,16 @@ behaviour on a Mac that has the driver means uninstalling it.
 TRACE 35951 APDU ins=a4 sw=9000              driver selects the private AID
 TRACE 35951 APDU ins=87 p1=11 p2=9a sw=6982  sign attempted, authentication needed
 TRACE 35957 CCID 69 Secure x1                PC_to_RDR_Secure: the pinpad request
-TRACE 39362 EVENT BUTTON                     the press
+TRACE 39362 EVENT BUTTON                     presence
 TRACE 39831 APDU ins=87 p1=11 p2=9a sw=9000  signed, 469 ms later
 ```
+
+Both transcripts here are the originals, captured on the RP2040 development
+build where presence came from a button — hence `EVENT BUTTON` and the 469 ms
+signature. They are kept as taken rather than restaged: the exchange either side
+of the presence event is what they were recorded to show, and that has not
+changed. On a current unit the same sequence reads `EVENT FINGER`, and signing
+is 196 ms.
 
 No `ins=20` VERIFY: no PIN is typed or transmitted. The `6982` is what makes
 CryptoTokenKit call `beginAuth`, and `CCID 69` is the secure-PIN request that
@@ -482,12 +502,12 @@ identifies our driver.
 ### Standard mode
 
 ```
-TRACE 428603 EVENT BUTTON                       the press
+TRACE 428603 EVENT BUTTON                       presence
 TRACE 428722 APDU ins=20 … sw=9000              VERIFY, the PIN the device typed
 TRACE 429183 APDU ins=87 p1=11 p2=9a sw=9000    signed
 ```
 
-580 ms press to signature, with nothing installed. macOS labels the prompt
+580 ms end to end on that build, with nothing installed. macOS labels the prompt
 *"Certificate For PIV Authentication (…)"*, which is `pivtoken`'s own format.
 
 The PIN is six random digits, generated fresh for each prompt, and is not a
@@ -505,7 +525,7 @@ will do**.
 | mode | behaviour |
 | --- | --- |
 | pinpad | **breathes** while waiting — macOS shows no prompt, so this is the entire invitation |
-| standard | **solid flash**, 700 ms, on a press, held through the signature |
+| standard | **solid flash**, 700 ms, on a match, held through the signature |
 
 The asymmetry is inherent. **macOS says nothing to the card until a PIN has
 already been submitted** — measured three times, including an empty trace with a
@@ -517,8 +537,8 @@ CCID 63 IccPowerOff      7.5 s later, nothing asked
 ```
 
 So in standard mode there is no event to light up on; the device can only
-acknowledge a press after the fact. A button that swallows presses without a
-flicker reads as broken, especially when the PIN it typed lands in a window the
+acknowledge a match after the fact. A sensor that reads a finger without a
+flicker looks broken, especially when the PIN it typed lands in a window the
 user is not looking at.
 
 A WS2812 latches its last value, so a board left glaring by earlier firmware
@@ -572,8 +592,8 @@ macOS reads the identity, and only signing fails. `STATUS` reports `alg=` and
 
 Certificates still work, because `decode_pem_cert()` in `piv.c` does its own
 base64. The card enumerates, macOS offers to pair, and only signing fails — with
-`6f00`. `TRACE` pinned it by showing `6f00` where a missing press would have
-given `6982`.
+`6f00`. `TRACE` pinned it by showing `6f00` where a missing presence check
+would have given `6982`.
 
 ### Apple's `pivtoken` ignores pinpad entirely
 
@@ -585,13 +605,12 @@ With Apple's built-in `pivtoken`: **not a single `PC_to_RDR_Secure`**, even with
 `bPINSupport = 0x01` declared.
 
 With the driver in [openhanko-macos](https://github.com/openhanko/openhanko-macos)
-it works — no dialog, nothing typed, authenticated by the button alone, 483 ms
-end to end.
+it works — no dialog, nothing typed, authenticated by the fingerprint alone.
 
 `sudo` is seamless, including the prompt: that repository's `tools/pam` module
 runs ahead of `pam_smartcard.so` and goes through CryptoTokenKit, so the token
-driver performs the authentication and the press is the whole interaction. A
-`sudo` traced on this device shows `CCID 69 Secure`, the press, and the
+driver performs the authentication and the touch is the whole interaction. A
+`sudo` traced on this device shows `CCID 69 Secure`, the match, and the
 signature, with **no `VERIFY` at all** — nothing was typed.
 
 What is *not* solved is applications that put up their own PIN field. Chrome's
@@ -807,16 +826,18 @@ The full per-use-case analysis is in [THREAT-MODEL.md](THREAT-MODEL.md); the
 short version:
 
 
-- **A button proves presence, not identity.** While the trigger is the button,
-  anyone who can reach the device can authenticate as you. The fingerprint sensor
-  is what changes that, and it works.
+- **A fingerprint proves an enrolled finger, not a person.** The sensor answers
+  over an unauthenticated UART, so someone who opens the case can assert a match
+  without one. Binding to the module's die stops the sensor being *swapped*;
+  nothing yet stops it being *driven*.
 - **The PIN is theatre.** `VERIFY` accepts any PIN and opens a window. macOS
-  insists on collecting one; the presence check is the only real gate.
-- **Keys are plaintext in flash** and come straight out over SWD. Closing this is
-  what the RP2350's secure boot and debug lockout are for, and none of it is
-  enabled yet.
-- **A press authorises a session, not a single operation.** Slot 9a consumes its
-  press per signature; slot 9d runs against a 60 s window that use does not
+  insists on collecting one; the fingerprint is the only real gate.
+- **Keys are encrypted at rest**, under a key held in OTP rather than in flash,
+  on a unit whose debug port is fused shut and which boots only signed firmware.
+  What that leaves is the firmware itself: it can read the OTP secret by design,
+  so a bug that leaks it costs everything the lockdown bought.
+- **A touch authorises a session, not a single operation.** Slot 9a consumes its
+  match per signature; slot 9d runs against a 60 s window that use does not
   consume, because macOS unwraps the login keychain there immediately after the
   9a signature that logged the user in.
 - Every attack here needs physical access.

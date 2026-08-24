@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-side setup for the button-gated PIV smart card.
+"""Host-side setup for the fingerprint-gated PIV smart card.
 
 Deliberately dependency-free: it talks to the device's CDC console with plain
 POSIX file I/O so there is nothing to install first.
@@ -179,9 +179,10 @@ def pick_port(explicit: str | None) -> str:
 def generate_identity(common_name: str, directory: str, algorithm: str = "ec") -> dict[str, str]:
     """Generates the 9a/9d keypairs and self-signed certificates.
 
-    ec  -> NIST P-256, PIV algorithm 0x11. Signs in ~200 ms on an RP2040.
-    rsa -> RSA-2048, PIV algorithm 0x07. ~3 s on an RP2040, which has no
-           big-integer accelerator.
+    ec  -> NIST P-256, PIV algorithm 0x11. Signs in 196 ms.
+    rsa -> RSA-2048, PIV algorithm 0x07. Seconds, not milliseconds: neither part
+           has a big-integer accelerator, and it measured 2.9 s on the RP2040
+           the figure was taken on. Long enough that the device reads as broken.
     """
     if not os.path.exists(OPENSSL):
         raise Failure("no openssl at /usr/bin/openssl")
@@ -305,7 +306,7 @@ def command_console(args: argparse.Namespace) -> None:
 
 def command_monitor(args: argparse.Namespace) -> None:
     port = pick_port(args.port)
-    say(f"watching {port}; press the device button to see events. Ctrl-C to stop.")
+    say(f"watching {port}; touch the sensor to see events. Ctrl-C to stop.")
     with Console(port) as console:
         try:
             while True:
@@ -403,7 +404,7 @@ def command_pair(args: argparse.Namespace) -> None:
     say(f"  found: {chosen[0]}  {chosen[1]}")
 
     say("")
-    say("Enabling pairing mode so the handshake does not need a press per signature.")
+    say("Enabling pairing mode so the handshake does not need a finger per signature.")
     with Console(port) as console:
         console.send("PAIRING_MODE", timeout=25)
 
@@ -445,8 +446,8 @@ def main() -> int:
     secrets.add_argument("--output", metavar="PATH", help="write somewhere other than src/secrets.h")
     secrets.add_argument("--force", action="store_true", help="overwrite an existing secrets.h")
     secrets.add_argument("--algorithm", choices=("ec", "rsa"), default="ec",
-                         help="ec = P-256 (default, fast everywhere); "
-                              "rsa = RSA-2048, ~3 s per signature on an RP2040")
+                         help="ec = P-256 (default, 196 ms per signature); "
+                              "rsa = RSA-2048, seconds per signature")
     secrets.set_defaults(handler=command_gen_secrets)
 
     provision = subparsers.add_parser("provision", help="generate and store a PIV identity",
@@ -455,8 +456,8 @@ def main() -> int:
     provision.add_argument("--keep-keys", metavar="DIR",
                            help="also save the generated private keys to DIR")
     provision.add_argument("--algorithm", choices=("ec", "rsa"), default="ec",
-                           help="ec = P-256 (default, fast everywhere); "
-                                "rsa = RSA-2048, ~3 s per signature on an RP2040")
+                           help="ec = P-256 (default, 196 ms per signature); "
+                                "rsa = RSA-2048, seconds per signature")
     provision.set_defaults(handler=command_provision)
 
     pair = subparsers.add_parser("pair", help="link the card to your macOS account",

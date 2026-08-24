@@ -101,15 +101,16 @@
 // A wrong guess fails closed — the device decides nothing is ever touching it
 // and refuses to authenticate — rather than open. The pin is also pulled to the
 // inactive level, so an unwired or disconnected TouchOut reads as "no finger"
-// instead of floating. STATUS reports the line as touch=, so if a real module
-// turns out to be active-low the diagnosis takes seconds.
+// instead of floating. Active-high is what the ZW111 does; STATUS reports the
+// line as touch=, which is how that was established and how a broken wire is
+// diagnosed.
 #define FINGERPRINT_TOUCH_ACTIVE_LEVEL 1
 
 // Whether a match is refused when the touch line disagrees.
 //
 // Kept separate from the pin definition so the correlation can be turned off
-// without unwiring anything, which is what to do first if a module arrives and
-// nothing authenticates.
+// without unwiring anything, which is what to do first if a board stops
+// authenticating with the sensor otherwise responding.
 #define FINGERPRINT_REQUIRE_TOUCH 1
 
 // Addressable RGB indicator (WS2812) on GP16. Driven by PIO, since the protocol

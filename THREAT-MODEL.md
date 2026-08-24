@@ -30,8 +30,9 @@ fails entirely. Telling users not to do it does not stop them.
 
 | asset | where it lives | if it leaks |
 | --- | --- | --- |
-| slot 9A private key | device flash, plaintext | attacker authenticates as the user, anywhere the key is trusted |
-| slot 9D private key | device flash, plaintext | attacker unwraps anything wrapped to it, incl. the login keychain |
+| slot 9A private key | device flash, AES-256-GCM | attacker authenticates as the user, anywhere the key is trusted |
+| slot 9D private key | device flash, AES-256-GCM | attacker unwraps anything wrapped to it, incl. the login keychain |
+| device secret | OTP page 4, chaffed, locked | both keys above, since it is what wraps them |
 | fingerprint templates | sensor module flash | biometric data; readable by whoever holds the module |
 | PIN | **nowhere — there is no real PIN** | n/a today |
 
@@ -45,7 +46,7 @@ section 6.
 | | capability | defensible |
 | --- | --- | --- |
 | **A. Compromised host** | full control of the Mac; cannot touch the device | **yes** — the primary defended threat |
-| **B. Offline extraction** | has the device powered off; can desolder, read flash, use lab equipment | **not today**; achievable with encryption at rest |
+| **B. Offline extraction** | has the device powered off; can desolder, read flash, use lab equipment | **yes** — flash yields ciphertext, and the key to it is in locked OTP |
 | **C. Physical possession, live** | has a working device; can open the case, cut and drive the sensor harness, glitch power | **no** — mitigations raise cost only |
 
 ## 4. Device states
@@ -55,14 +56,17 @@ meaningless without saying which one it describes.
 
 | state | debug port | key at rest | glitch errata |
 | --- | --- | --- | --- |
-| **RP2350 A2** | lockable | plaintext in external QSPI | E16, E20, E24 all open |
-| **RP2350 A4**, no lockdown | open until fused | plaintext in external QSPI | fixed in silicon |
-| **RP2350 A4** + secure boot + SWD fused | closed | plaintext in external QSPI | fixed in silicon |
-| **RP2350 A4** + above + key wrapped to OTP | closed | ciphertext | fixed in silicon |
-| **RP2350 A4** + above + PIN in the KDF | closed | ciphertext, underivable without the PIN | fixed in silicon |
+| | state | debug port | key at rest | glitch errata |
+| ---: | --- | --- | --- | --- |
+| 1 | **RP2350 A2** | lockable | plaintext | E16, E20, E24 all open |
+| 2 | **RP2350 A4**, no lockdown | open until fused | plaintext | fixed in silicon |
+| 3 | **RP2350 A4** + secure boot + SWD fused | closed | plaintext | fixed in silicon |
+| 4 | **RP2350 A4** + above + key wrapped to OTP | closed | ciphertext | fixed in silicon |
+| 5 | **RP2350 A4** + above + PIN in the KDF | closed | ciphertext, underivable without the PIN | fixed in silicon |
 
 Only the last row makes a stolen device inert. Read `chip=` from `STATUS` to
-find out which silicon is in front of you; nothing else reports it reliably.
+find out which silicon is in front of you and `otp=` for whether it has a
+secret; nothing else reports either reliably.
 
 **A provisioned unit is row 4** — A4 silicon, secure boot on, SWD fused, key
 material wrapped to a chaffed OTP secret. Verified end to end on hardware: the
@@ -83,24 +87,32 @@ Verified in `src/piv.c`:
 | operation | what it requires | what that costs an attacker holding the device |
 | --- | --- | --- |
 | `VERIFY` | any bytes — the PIN is discarded (`(void)data;`), always `9000`, 60 s window | nothing |
-| `GENERAL AUTHENTICATE` **slot 9D** (ECDH) | a button press inside a 60 s session window, not consumed on use | one press |
-| `GENERAL AUTHENTICATE` **slot 9A** (sign) | a button press inside a 10 s window | one press, which they perform |
-| `PAIRING_MODE` | a press; then 9A signs freely for 120 s | one press |
-| console config commands | a press, then a 120 s window | one press |
+| `GENERAL AUTHENTICATE` **slot 9D** (ECDH) | a fingerprint match inside a 60 s session window, not consumed on use | an enrolled finger |
+| `GENERAL AUTHENTICATE` **slot 9A** (sign) | a fingerprint match inside a 10 s window | an enrolled finger, which the user presents |
+| `CONFIG_UNLOCK`, then `PAIRING_MODE` | **a button press**, then 9A signs freely for 120 s | **one press of an external button** |
+| console config commands | the same unlock window | the same press |
 | factory reset | button held through power-up; **no host path at all** | — |
 
 There is no PIN retry counter and no lockout, because there is no PIN to count
 against. `VERIFY` returns `9000` rather than the `63CX` retries-remaining a
 standard PIV card returns.
 
+**The console unlock is the exception to fingerprint-only, and it is a real
+one.** `CONFIG_UNLOCK` in `config_console.c` waits on `button_pressed()`, not on
+a match. On a sealed unit the button is on the outside and the CDC console is on
+the same cable as the card, so a host with a person beside it gets 120 seconds
+in which `PAIRING_MODE` makes 9A sign on demand — the exact capability the
+fingerprint exists to gate, reached without one. It is not the factory-reset or
+enrolment role the button is documented as having. Listed in section 8.
+
 Slot 9D used to be the sharpest edge: ungated entirely, so a compromised host
 could run key agreement against it silently and at will. It is now gated on a
-press, but against a *separate 60 s window* that signing does not consume —
+match, but against a *separate 60 s window* that signing does not consume —
 because macOS unwraps the login keychain there immediately after the 9A
 signature that logged the user in, and checking 9A's own window would refuse the
 unwrap that always follows a successful login.
 
-Verified on hardware: press → 9A `9000` → 9D `9000` 1.2 s later, no prompts.
+Verified on hardware: touch → 9A `9000` → 9D `9000` 1.2 s later, no prompts.
 
 ### What does hold today
 
@@ -111,8 +123,8 @@ Verified on hardware: press → 9A `9000` → 9D `9000` 1.2 s later, no prompts.
   through a repeated or predictable nonce.
 - **Factory reset has no host-reachable path.** Malware cannot destroy a user's
   credentials, whatever it sends.
-- **A press is required per 9A signature window**, so a compromised host cannot
-  sign in the background while the device sits in a dock.
+- **A fingerprint is required per 9A signature window**, so a compromised host
+  cannot sign in the background while the device sits in a dock.
 
 That last line is the real product: **against attacker A, the device works.**
 
@@ -120,9 +132,9 @@ That last line is the real product: **against attacker A, the device works.**
 
 ### Local unlock — macOS login, `sudo`, authorisation prompts
 
-**Honest today.** A compromised host cannot sign without a press. A stolen device
-is worth having only together with the user's Mac, and the exposure ends at that
-Mac.
+**Honest today.** A compromised host cannot sign without a fingerprint. A stolen
+device is worth having only together with the user's Mac, and the exposure ends
+at that Mac.
 
 Presence is a fingerprint match, verified on hardware. It proves a finger
 enrolled on this device is present — which is a claim about *who*, bounded by
@@ -133,7 +145,8 @@ is unauthenticated.
 
 **Not defended. A stolen device is a full compromise.** The attacker does not
 need the user's Mac, or the user's network, or anything else — the credential is
-remote-usable by definition, and the device will sign for whoever presses it.
+remote-usable by definition, and the device will sign for whoever can put an
+enrolled finger — or a forged sensor answer — in front of it.
 
 This is the case the device is not built for and cannot refuse. It should be
 stated in the product documentation in these words, not softened.
@@ -182,14 +195,18 @@ per session, then touch — not a flag flip.
 
 ## 8. Gaps, ordered
 
-1. **No real PIN.** The only remaining defence against attacker C, who holds the
+1. **`CONFIG_UNLOCK` is gated on the button, not a fingerprint.** The one path
+   that reaches signing without a match, and the button is on the outside of the
+   case. Closing it means demanding a match there instead, with the existing
+   blank-device exemption kept so first-time provisioning still works.
+2. **No real PIN.** The remaining defence against attacker C, who holds the
    device and can drive the sensor link. The at-rest work it depended on is
    done, so this is now buildable rather than blocked.
-2. **The firmware is the oracle.** It can read the OTP secret — that is the
+3. **The firmware is the oracle.** It can read the OTP secret — that is the
    design — so a bug that leaks it costs everything the lockdown bought. A
    standing constraint, not a task: never add anything that returns it.
-3. **No rate limiting** on signature operations.
-4. **A touch authorises a window, not an operation.** Slot 9A accepts any
+4. **No rate limiting** on signature operations.
+5. **A touch authorises a window, not an operation.** Slot 9A accepts any
    signature for 10 s after a match and slot 9D for 60 s, the latter not
    consumed on use. In driverless mode this is structural — the card is told
    nothing until a PIN arrives, so the touch has to come first.

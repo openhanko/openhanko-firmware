@@ -139,9 +139,11 @@ typedef struct {
 
 // PS_ReadINFpage (0x16): reads the module's 512-byte info page.
 //
-// UNTESTED against hardware, and the field offsets are still a guess: the
-// manual documents the fields and their lengths but not their offsets within
-// the page. Diagnostic only — bind to fingerprint_chip_serial() instead.
+// The manual documents the fields and their lengths but not their offsets, so
+// the offsets in the implementation were recovered from a real module and are
+// corroborated at four independent points. Diagnostic only — bind to
+// fingerprint_chip_serial() instead, which identifies the die rather than the
+// model.
 bool fingerprint_read_info(fp_info_t *out);
 
 // The info page as the module sent it, for working out where the fields
@@ -154,7 +156,9 @@ uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
 bool fingerprint_chip_serial(uint8_t out[FP_CHIP_SERIAL_LEN]);
 
 // Whether the module's TouchOut line is wired on this board, and what it says
-// right now. Reported by STATUS: if a module arrives and never authenticates,
-// this is the first thing to look at — the line's polarity is a guess.
+// right now. Reported by STATUS, which is the first place to look if a board
+// stops authenticating: the correlation in fingerprint_verify() refuses a match
+// that arrives while this line says nothing is touching the sensor, so a broken
+// wire presents as a sensor that lights up and never accepts a finger.
 bool fingerprint_touch_wired(void);
 bool fingerprint_touch_asserted(void);

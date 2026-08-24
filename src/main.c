@@ -8,6 +8,7 @@
 #include "hardware/watchdog.h"
 #include "pico/rand.h"
 #include "pico/stdlib.h"
+#include "otp.h"
 #include "piv.h"
 #include "settings.h"
 #include "status_led.h"
@@ -84,12 +85,16 @@ static void random_pin(char *out, size_t digits) {
 // answer a PIN request. Setting it only on the button path — which is what this
 // did before — meant a fingerprint match authorised signing but never completed
 // the pinpad exchange, leaving macOS waiting on a card that had already agreed.
+//
+// The event is EVENT TOUCH rather than the EVENT PRESS it was under the button
+// build. Nothing parses it; the traces in the READMEs that still read
+// EVENT BUTTON are the originals from that build, kept as taken.
 static void note_presence(const char *source) {
   piv_set_presence_source(source);
   last_press_ms = now_ms();
   confirm_until_ms = now_ms() + CONFIRM_MS;
   printf("main: presence from %s; authorizing PIV and typing the dummy PIN\n", source);
-  config_console_send_line("EVENT PRESS");
+  config_console_send_line("EVENT TOUCH");
   piv_note_user_presence();
   // Type unless the driver is handling this particular request.
   //
@@ -148,9 +153,8 @@ static void factory_reset_gesture(void) {
   //
   // Rate-limited because each call is a UART exchange, and the half-period falls
   // to 50 ms near the end. Skipping a toggle simply leaves the ring in its last
-  // state a little longer, which reads as the blink saturating rather than as a
-  // fault. Untested against a module: the timing here is the part most likely to
-  // need adjusting once one exists.
+  // state a little longer, which on a module reads as the blink saturating
+  // rather than as a fault.
   uint32_t last_ring_ms = 0;
   bool ring_lit = false;
 

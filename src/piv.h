@@ -22,10 +22,11 @@ const char *piv_algorithm_name(void);
 int piv_key_parse_error(void);
 
 // Opens a short window during which the authentication key (slot 9a) may be
-// used once. Called after a debounced button press.
+// used once. Called after a fingerprint match.
 void piv_note_user_presence(void);
 
-// Labels the next trace entry: "FINGER", "BUTTON". Purely diagnostic.
+// Labels the next trace entry — "FINGER" is the only source that authorises
+// anything. Purely diagnostic.
 void piv_set_presence_source(const char *source);
 
 // Tells the applet that nothing can be authorised yet because a sensor is

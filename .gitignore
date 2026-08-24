@@ -20,8 +20,9 @@ build-*/
 */sdkconfig
 */sdkconfig.old
 .cache/
+out/
 
-# bench build tree (BUTTON_AUTHENTICATES=ON) — never a shipping image
+# leftover bench build tree from the removed BUTTON_AUTHENTICATES flag
 build-bench/
 
 # Vendor documentation: kept locally, never redistributed.
