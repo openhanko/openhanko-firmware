@@ -91,13 +91,21 @@ static void note_presence(const char *source) {
   printf("main: presence from %s; authorizing PIV and typing the dummy PIN\n", source);
   config_console_send_line("EVENT PRESS");
   piv_note_user_presence();
-  // Typing the PIN is the driverless mechanism and only the driverless
-  // mechanism. In pinpad mode the driver answers the PIN request over
-  // PC_to_RDR_Secure and the card is satisfied without a keystroke — so typing
-  // there is not merely redundant, it puts six digits into whatever happens to
-  // have keyboard focus, which during a sudo is the terminal the user is
-  // looking at.
-  if (settings_aid_mode() != AID_MODE_PINPAD) {
+  // Type unless the driver is handling this particular request.
+  //
+  // Not "unless we are in pinpad mode", which is what this used to say and which
+  // broke the lock screen: pinpad governs the CryptoTokenKit-to-card leg, and
+  // the lock screen does not use it. It collects the PIN in a text field the
+  // same way stock sudo does, so a device in pinpad mode typed nothing and the
+  // field stayed empty — the sensor read the finger and the Mac stayed locked.
+  //
+  // An outstanding PC_to_RDR_Secure is the actual signal that the driver has
+  // this one covered. When there is none, something else may be waiting on a
+  // keystroke and there is no way to find out which: the card is told nothing
+  // until a PIN has already been submitted, so typing on presence is the only
+  // mechanism available. The cost is that an idle touch puts six digits into
+  // whatever has focus.
+  if (!usb_ccid_pin_pending()) {
     char pin[PIV_DUMMY_PIN_DIGITS + 1];
     random_pin(pin, PIV_DUMMY_PIN_DIGITS);
     if (!usb_hid_type_line(pin)) {
