@@ -434,8 +434,23 @@ The fingerprint module's own ring, driven over the same UART that carries
 matches. There is no separate LED — see [pinout](#pinout) — which means the
 light the user is asked to react to is on the surface they are asked to touch.
 
+`PS_ControlBLN` takes a **three-bit colour mask**, one bit per channel and no
+intensity, so the palette is exactly eight values and nothing between them:
+
+| mask | | mask | |
+| --- | --- | --- | --- |
+| `0x00` | off | `0x04` | red — refused, or armed to erase |
+| `0x01` | blue — idle, and waiting for a finger | `0x05` | purple — enrolling |
+| `0x02` | green — accepted | `0x06` | yellow — powered up |
+| `0x03` | cyan — unused | `0x07` | white — unused |
+
+Anything off that list, orange included, is not a colour this ring can be asked
+for. Only the breathing effect takes a start and end colour separately, and it
+transitions between two of the eight rather than mixing them.
+
 | mode | behaviour |
 | --- | --- |
+| power-up | **two yellow flashes**, then the ring goes to whatever the state calls for |
 | pinpad | **breathes** while waiting — macOS shows no prompt, so this is the entire invitation |
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 
@@ -448,6 +463,14 @@ So in standard mode there is no event to light up on; the device can only
 acknowledge a match after the fact. A sensor that reads a finger without a
 flicker looks broken, especially when the PIN it typed lands in a window the
 user is not looking at.
+
+The power-up flash exists for the same reason. A provisioned unit used to blink
+on its way through the SDK's double-reset bootloader window; that is gone, and
+the bootrom's double-tap that replaced it runs silently, so without this the
+device boots, binds and sits dark — indistinguishable from a dead one. It is
+skipped when the device has no finger enrolled, because the purple that means
+"enrol one" is the more useful thing to show, and when the module does not match,
+because red means stop.
 
 ## Implementation notes
 

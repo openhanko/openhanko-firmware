@@ -235,6 +235,14 @@ static bool enroll_owns_ring;
 static bool mirror_light_stale;
 static void mirror_light_invalidate(void) { mirror_light_stale = true; }
 
+// Holds the ring for the power-up flash.
+//
+// Without it the flash would never be seen: mirror_light()'s `shown` starts
+// unset, so its first call always writes, and an idle device writes
+// STATUS_LED_OFF. The window ends on its own and the indicator takes over.
+#define BOOT_LIGHT_MS 1500
+static uint32_t boot_light_until;
+
 static void mirror_light(status_led_mode_t mode) {
   static status_led_mode_t shown = (status_led_mode_t)-1;
   if (mirror_light_stale) { mirror_light_stale = false; shown = (status_led_mode_t)-1; }
@@ -243,6 +251,13 @@ static void mirror_light(status_led_mode_t mode) {
     // would sit in whatever colour enrollment left behind.
     shown = (status_led_mode_t)-1;
     return;
+  }
+  if (boot_light_until) {
+    if ((int32_t)(now_ms() - boot_light_until) < 0) {
+      shown = (status_led_mode_t)-1;
+      return;
+    }
+    boot_light_until = 0;
   }
   if (!fingerprint_present() || mode == shown) return;
   shown = mode;
@@ -617,6 +632,21 @@ int main(void) {
   // is the only period in which appropriating it would be worth anything.
   if (fingerprint_present() && fingerprint_template_count() < ENROLL_MINIMUM) {
     enroll_open("fewer fingers enrolled than the minimum");
+  } else if (fingerprint_present() && !module_mismatch) {
+    // Say something on power-up.
+    //
+    // A provisioned unit used to blink on its way through the SDK's double-reset
+    // bootloader window. That is gone — the bootrom's own double-tap replaced it
+    // and runs silently — so the device now boots, binds, and sits dark, which
+    // looks exactly like one that is dead.
+    //
+    // Yellow because the ring cannot do orange. PS_ControlBLN takes a three-bit
+    // mask, one bit per channel, so the entire palette is the eight combinations
+    // of red, green and blue; orange needs green at partial intensity and there
+    // is no intensity to set. Of what exists, yellow is nearest, and it is not
+    // one of the four the device already uses to mean something.
+    fingerprint_light(FP_LIGHT_FLASH, FP_LED_YELLOW, 2);
+    boot_light_until = now_ms() + BOOT_LIGHT_MS;
   }
 
   // No RTOS. Everything runs here: USB, the console, and the button. The only
