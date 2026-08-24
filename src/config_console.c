@@ -241,7 +241,7 @@ static void handle_command(void) {
     // opcode that does not exist answers differently.
     const char *reading =
         cc == 0xff       ? "no_module" :
-        cc == control    ? "acks_anything" :
+        cc == control    ? "same_as_unknown_opcode" :
         cc == 0x00       ? "implemented" :
         cc == 0x31       ? "implemented_wrong_level" :
         cc == 0x2e       ? "implemented_no_key" :

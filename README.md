@@ -733,18 +733,30 @@ where the firmware can read them. That is the standing gap, not a new one.
 
 ### What is unresolved
 
-- **Whether the ZW111 supports any of it.** Answered, and better than expected:
-  `FINGERPRINT_SECPROBE` sends `PS_GetCiphertext` and the module replies `0x00`
-  — which for this command means "subsequent data packets will be sent", the
-  documented success path. **The set is implemented, and it answered at
-  `SecurLevel 0`**, which the manual says should not happen: levels 0 and 1 are
-  listed as not supporting the safety set at all.
+- **Whether the ZW111 supports any of it.** Open, and the first answer was
+  ambiguous. `FINGERPRINT_SECPROBE` sends `PS_GetCiphertext`; the module replies
+  `0x00`, which for this command means "subsequent data packets will be sent" —
+  and then sends nothing.
 
-  That reopens a better question than the one it closed. If the set works at
-  level 0, `PS_SecuritySearch` may be usable *alongside* the ordinary commands,
-  and the whole cost of moving to level 3 — losing `PS_AutoEnroll`, rebuilding
-  enrolment — may not have to be paid at all. What decides it is whether
-  `PS_GetKeyt` also answers at level 0. That one clears enrolled templates as
+  Two readings fit. The module implements the set and has nothing to send at
+  `SecurLevel 0`, or `0x00` is what this firmware returns for any opcode its
+  dispatcher does not handle. The second is an ordinary shortcut and says
+  nothing about the part: the manual scopes the set to "some fingerprint module
+  products based on security chips", so a genuine module whose build omits it
+  answers exactly this way.
+
+  The probe therefore also sends `0x7F`, an opcode outside every range the
+  manual assigns. **Different codes** mean the dispatcher discriminates and
+  `0xE2` reached a real handler; **the same code** means `0x00` is this
+  firmware's answer to anything it does not implement. A fault on our side is
+  already excluded — `PS_ReadINFpage` returns 512 bytes through the same stream
+  path and works.
+
+  If it turns out to be real, the question gets better rather than harder: a set
+  that answers at level 0 might let `PS_SecuritySearch` run *alongside* the
+  ordinary commands, and the whole cost of level 3 — losing `PS_AutoEnroll`,
+  rebuilding enrolment — would not have to be paid. What decides that is whether
+  `PS_GetKeyt` also answers at level 0, and that one clears enrolled templates as
   its first act, so it is a spare-module experiment.
 - **The level is one-way.** "Changes are not allowed after setting." A module set
   to a level whose protocol we cannot implement is finished — and if the set

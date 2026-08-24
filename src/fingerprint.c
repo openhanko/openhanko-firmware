@@ -807,14 +807,24 @@ uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len
   // The control, and the reason this is worth running at all.
   //
   // An acknowledgement of 0x00 to 0xE2 only means something if this module can
-  // say no. Plenty of modules in this family answer every opcode they do not
-  // recognise with the same success code, and against one of those the whole
-  // safety-instruction lead is an artefact. So ask it something that certainly
-  // does not exist: 0x7F is outside every range the manual assigns, and far
-  // enough from 0xE0-0xE4 not to land in some adjacent undocumented handler.
+  // say no. Returning a success code for an opcode the dispatcher does not
+  // handle is an ordinary firmware shortcut and says nothing about the part —
+  // the manual scopes the safety set to "some fingerprint module products based
+  // on security chips", so a genuine module whose build simply omits it would
+  // answer exactly this way. Either way the reply carries no information until
+  // there is something to compare it against.
   //
-  // Different codes mean the module distinguishes opcodes and 0xE2 is real.
-  // Identical codes mean it acknowledges anything and 0xE2 proved nothing.
+  // So ask for something that certainly does not exist: 0x7F is outside every
+  // range the manual assigns, and far enough from 0xE0-0xE4 not to land in some
+  // adjacent undocumented handler.
+  //
+  // Different codes mean the dispatcher discriminates and 0xE2 reached a real
+  // handler. Identical codes mean 0x00 is what this firmware says to anything it
+  // does not implement, and 0xE2 told us nothing.
+  //
+  // What is already ruled out is a fault on our side: PS_ReadINFpage returns 512
+  // bytes as a data stream through the same path, and that works, so bytes=0 is
+  // the module declining to send rather than us failing to read.
   uint8_t control = exchange(0x7f, NULL, 0, NULL, 0, NULL, 1000);
   if (control == CC_OK) {
     uint8_t scratch[32];
