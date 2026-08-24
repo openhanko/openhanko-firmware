@@ -152,6 +152,16 @@ bool fingerprint_read_info(fp_info_t *out);
 // actually live. Returns bytes stored.
 uint16_t fingerprint_read_info_page(uint8_t *out, uint16_t cap);
 
+// PS_GetKeyt: asks the module for the safety instruction set's key material.
+//
+// **Destructive.** It clears enrolled templates, and if the encryption level
+// commits here rather than at the PS_WriteReg that stages it, the module loses
+// PS_Search, PS_StoreChar and PS_AutoEnroll permanently.
+//
+// 0x00 and 32 bytes is keys A and B. 0x2e is "secret key does not exist", 0x31
+// "does not match the encryption level", 0x32 "the secret key is locked".
+uint8_t fingerprint_security_getkey(uint8_t *out, uint16_t cap, uint16_t *out_len);
+
 // PS_WriteReg: writes one module register, returning the raw confirmation code.
 //
 // The register table, from the manual: 0 serial-port delay, 1 EnrollTimes,

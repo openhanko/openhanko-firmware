@@ -255,6 +255,34 @@ static void handle_command(void) {
     send_line(line);
 
 #if FINGERPRINT_LAB_TOOLS
+  } else if (strcmp(command, "FINGERPRINT_GETKEY CONFIRM") == 0) {
+    // Bench builds only, and the word is required because this one cannot be
+    // taken back: PS_GetKeyt erases the module's templates, and may be the point
+    // at which a staged encryption level becomes permanent.
+    uint8_t key[256];
+    uint16_t key_len = 0;
+    if (!require_config_authorization()) return;
+    if (!demand_button_press()) return;
+    uint8_t cc = fingerprint_security_getkey(key, sizeof(key), &key_len);
+    const char *meaning =
+        cc == 0x00 ? "key_issued" :
+        cc == 0x2e ? "no_key" :
+        cc == 0x31 ? "wrong_encryption_level" :
+        cc == 0x32 ? "key_locked" :
+        cc == 0x18 ? "module_flash_error" :
+        cc == 0x19 ? "rng_failed" :
+        cc == 0x01 ? "packet_error" :
+        cc == 0xff ? "no_module" : "unexpected";
+    int w = snprintf(line, sizeof(line), "OK FINGERPRINT_GETKEY cc=%02x %s bytes=%u ",
+                     cc, meaning, (unsigned)key_len);
+    for (uint16_t i = 0; i < key_len && w < (int)sizeof(line) - 3; i++) {
+      w += snprintf(line + w, sizeof(line) - (size_t)w, "%02x", key[i]);
+    }
+    send_line(line);
+
+  } else if (strcmp(command, "FINGERPRINT_GETKEY") == 0) {
+    send_line("ERR FINGERPRINT_GETKEY erases_templates_say=CONFIRM");
+
   } else if (strncmp(command, "FINGERPRINT_REG ", 16) == 0) {
     // Writes one module register. Bench builds only: -DFINGERPRINT_LAB_TOOLS=ON.
     //

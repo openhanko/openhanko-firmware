@@ -60,6 +60,7 @@
 #define CC_DB_FULL        0x1f
 #define CC_TIMEOUT        0x26
 #define INS_WRITE_REG 0x0e
+#define INS_SEC_GET_KEYPAIR 0xe0
 
 // Safety instruction set, 0xE0-0xE4. Only 0xE2 is issued here, and only to ask
 // whether the module knows the opcode at all — see fingerprint_security_probe().
@@ -780,12 +781,17 @@ bool fingerprint_read_info(fp_info_t *out) {
 static uint16_t drain_raw(uint8_t *out, uint16_t cap, uint32_t window_ms) {
   uint16_t n = 0;
   uint32_t deadline = now_ms() + window_ms;
-  while (n < cap) {
+  for (;;) {
     uint8_t byte = 0;
     if (!read_byte(&byte, deadline)) break;
-    out[n++] = byte;
+    // Keep consuming past the buffer rather than stopping at it. Stopping left
+    // the tail of a 512-byte page in the pipe, where the next command read it
+    // as its own reply — which made a probe that had changed nothing look like
+    // it had started returning data, twice in a row and reproducibly.
+    if (n < cap) out[n] = byte;
+    n++;
   }
-  return n;
+  return n > cap ? cap : n;
 }
 
 uint8_t fingerprint_write_register(uint8_t reg, uint8_t value) {
@@ -796,6 +802,35 @@ uint8_t fingerprint_write_register(uint8_t reg, uint8_t value) {
   // baud rate. The timeout is generous because a flash write is involved.
   uint8_t params[2] = {reg, value};
   return exchange(INS_WRITE_REG, params, sizeof(params), NULL, 0, NULL, 2000);
+}
+
+uint8_t fingerprint_security_getkey(uint8_t *out, uint16_t cap, uint16_t *out_len) {
+  if (out_len) *out_len = 0;
+  if (!module_present) return 0xff;
+
+  // PS_GetKeyt. **Destructive**, in two ways the manual states plainly.
+  //
+  // It "clears the internal data (if it has been entered)" — enrolled templates
+  // go. And if the encryption level really does commit here rather than at the
+  // PS_WriteReg that stages it, this is the moment a module stops answering
+  // PS_Search, PS_StoreChar and PS_AutoEnroll for the rest of its life.
+  //
+  // That second possibility is the reason to run it. Writing register 7 leaves
+  // Secur Level reading 0, which reads as an inert register — but the manual
+  // says to "call the write system register PS_WriteReg instruction to set the
+  // encryption level, and then call the PS_GetKeyt instruction to obtain and
+  // store the secret key", which fits a level that is staged and only becomes
+  // real once a key exists. Both readings explain every observation so far;
+  // only this command separates them.
+  //
+  // 32 bytes back is keys A and B at levels 2-4, or the ECC private key at 21.
+  // 132 is the RSA public key and modulus at 20.
+  uint8_t cc = exchange(INS_SEC_GET_KEYPAIR, NULL, 0, NULL, 0, NULL, 3000);
+  if (cc == CC_OK) {
+    uint16_t n = drain_raw(out, cap, 3000);
+    if (out_len) *out_len = n;
+  }
+  return cc;
 }
 
 uint8_t fingerprint_security_probe(uint8_t *out, uint16_t cap, uint16_t *out_len,
@@ -875,6 +910,9 @@ bool fingerprint_erase_all(void) { return false; }
 bool fingerprint_light(fp_light_t e, fp_color_t c, uint8_t n) { (void)e; (void)c; (void)n; return false; }
 bool fingerprint_random(uint32_t *out) { (void)out; return false; }
 uint8_t fingerprint_write_register(uint8_t r, uint8_t v) { (void)r; (void)v; return 0xff; }
+uint8_t fingerprint_security_getkey(uint8_t *o, uint16_t c, uint16_t *l) {
+  (void)o; (void)c; if (l) *l = 0; return 0xff;
+}
 uint8_t fingerprint_security_probe(uint8_t *o, uint16_t c, uint16_t *l, uint8_t *k) {
   (void)o; (void)c; if (l) *l = 0; if (k) *k = 0xff; return 0xff;
 }
