@@ -28,6 +28,11 @@ void piv_note_user_presence(void);
 // Labels the next trace entry: "FINGER", "BUTTON". Purely diagnostic.
 void piv_set_presence_source(const char *source);
 
+// Tells the applet that nothing can be authorised yet because a sensor is
+// fitted and no finger is enrolled. GENERAL AUTHENTICATE then answers 6985
+// rather than 6982, so a host can tell "touch it" from "set it up first".
+void piv_set_setup_incomplete(bool incomplete);
+
 // Marks the PIN as verified without an APDU. Used by the pinpad path, where
 // the host delegates PIN entry to the reader and no VERIFY ever arrives.
 void piv_note_pin_verified(void);

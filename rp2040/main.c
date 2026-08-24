@@ -402,6 +402,7 @@ static void poll_enrollment(void) {
 // True once a match has been accepted, until the finger comes off again.
 static bool finger_seen;
 
+
 static void poll_fingerprint(void) {
   if (!fingerprint_present()) return;
 
@@ -554,6 +555,11 @@ int main(void) {
     upgrade_if_driver_present();
     revert_if_unclaimed();
 
+    // Keep the applet's idea of readiness current: a sensor with nothing
+    // enrolled cannot authorise anything, and the status word should say so.
+    piv_set_setup_incomplete(fingerprint_present() &&
+                             fingerprint_template_count() == 0);
+
     status_led_mode_t indicator = led_mode();
     status_led_update(indicator);
     mirror_light(indicator);
@@ -561,20 +567,6 @@ int main(void) {
     // impressions stolen by the authentication poll.
     if (enroll_state == ENROLL_IDLE) poll_fingerprint();
     poll_enrollment();
-
-    if (usb_ccid_pin_pending() && fingerprint_present() &&
-        fingerprint_template_count() == 0) {
-      // macOS offers to pair the moment the card is inserted, which on a device
-      // straight out of the box is before any finger exists. Nothing can satisfy
-      // that request — the button does not authenticate and there is no template
-      // to match — so refuse it rather than leave a prompt on screen waiting for
-      // something that cannot happen. The ring stays purple, still asking for
-      // the thing the device actually needs.
-      printf("main: refusing pinpad request, no finger enrolled yet\n");
-      config_console_send_line("EVENT PINPAD_NO_TEMPLATE");
-      usb_ccid_pin_complete(false);
-      continue;
-    }
 
     if (usb_ccid_pin_pending()) {
       // The host is waiting on a pinpad PIN entry. Either the user presses now,

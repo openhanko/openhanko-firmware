@@ -94,6 +94,18 @@ static uint32_t user_presence_until;
 // Same press, second window. See the key agreement branch for why it cannot
 // share user_presence_until.
 static uint32_t session_presence_until;
+
+// True when the device cannot authenticate for anybody yet, because a sensor is
+// fitted and nothing is enrolled on it.
+//
+// Worth a status word of its own. "No presence yet" and "this device is not set
+// up" are both refusals, but only one of them can be fixed by touching the
+// sensor, and a host that cannot tell them apart can only offer the wrong
+// advice. 6982 means authentication is needed; 6985 — conditions of use not
+// satisfied — means the request cannot succeed in the device's current state,
+// which is exactly the distinction.
+static bool setup_incomplete;
+void piv_set_setup_incomplete(bool incomplete) { setup_incomplete = incomplete; }
 static uint32_t pairing_mode_until;
 static uint32_t challenge_until;
 static uint32_t signature_until;
@@ -564,6 +576,11 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
   if (!(apdu[3] == 0x9a || apdu[3] == 0x9d)) {
     return append_sw(response, response_len, response_cap, 0x6a86);
   }
+  if (setup_incomplete) {
+    LOG("refused: no fingerprint enrolled, the device is not set up");
+    return append_sw(response, response_len, response_cap, 0x6985);
+  }
+
   if (!window_open(pin_verified_until, PIN_VERIFIED_WINDOW_MS)) {
     pin_verified_until = 0;
     return append_sw(response, response_len, response_cap, 0x6982);
