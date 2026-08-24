@@ -420,17 +420,20 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `FINGERPRINT_INFO` | model, firmware, manufacturer, sensor name |
 | `FINGERPRINT_SN` | the module's per-die serial — what binding is against |
 | `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
-| `OTP_STATUS` / `OTP_PROVISION` | the device secret; provisioning is irreversible and one-shot |
+| `OTP_STATUS` | whether the device holds a secret, and which one, by hash |
 | `AID_MODE standard\|pinpad` | force the AID mode instead of letting the probe decide |
 | `BOOTLOADER` | reboot to USB mass-storage bootloader |
 | `REBOOT`, `USB_RECONNECT` | as named |
 | `CONFIG_UNLOCK` | required before `BOOTLOADER` |
 
-**Everything here reads or reboots.** Nothing on this console loads a key,
-enrols a finger, erases a template or waives the presence check — those either
-moved to a physical gesture or stopped existing. What is left cannot be turned
-into an attack by a host that owns the Mac, which is the point: the console is
-on the same cable as the card.
+**Nothing here is irreversible, and nothing here reaches a key.** No command
+loads one, generates one, signs with one, enrols a finger, erases a template or
+burns a fuse — those either moved to a physical gesture or stopped existing.
+`AID_MODE` is the only one that writes anything at all, it costs a button press,
+and what it writes is which AID to answer.
+
+That matters because the console is on the same cable as the card: whatever it
+can do, a host that owns the Mac can do.
 
 `TRACE` is the most useful debugging tool here; it is the witness that settled
 most of the behaviour documented below.

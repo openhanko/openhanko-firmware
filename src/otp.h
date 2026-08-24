@@ -18,9 +18,11 @@
 // debug lockout and secure boot worth doing, not a defence that stands alone.
 //
 // Every bit here is permanent. There is no erase, no rewrite, and no way back:
-// a row written wrong stays wrong for the life of the part. Nothing in this file
-// is called automatically for that reason — provisioning happens when somebody
-// asks for it and proves they are holding the device.
+// a row written wrong stays wrong for the life of the part. So there is exactly
+// one caller of the write path — main(), at the first boot of a device that has
+// no identity yet — and no way to reach it from the console or from a host. A
+// secret is needed at precisely that moment and never again, including across a
+// factory reset, which destroys the identity in flash and cannot touch OTP.
 
 // The page map.
 //
@@ -85,9 +87,10 @@ bool otp_secret_present(void);
 // Reads the secret. False if the page is blank or the read is refused.
 bool otp_secret_read(uint8_t out[OTP_SECRET_LEN]);
 
-// Generates a secret and burns it in. **Irreversible.** Refuses if the page is
-// already written, verifies by reading back, and returns false rather than
-// leaving a half-written page unreported.
+// Generates a secret and burns it in. **Irreversible**, and called from exactly
+// one place: first boot with no identity. Refuses if the page is already
+// written, verifies by reading back, and returns false rather than leaving a
+// half-written page unreported.
 bool otp_secret_provision(void);
 
 // A short identifier for the secret — the first bytes of its SHA-256 — so a

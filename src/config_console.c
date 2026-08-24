@@ -218,25 +218,6 @@ static void handle_command(void) {
     }
     send_line(line);
 
-  } else if (strcmp(command, "OTP_PROVISION") == 0) {
-    // Burns a device secret into OTP. There is no undo, no erase and no second
-    // attempt: the page is consumed whatever the outcome. So it costs a press,
-    // like every other irreversible thing here, and it refuses outright if the
-    // page already holds something.
-    if (otp_secret_present()) {
-      send_line("ERR OTP_PROVISION already_provisioned");
-      return;
-    }
-    if (!demand_button_press()) return;
-    if (!otp_secret_provision()) {
-      send_line("ERR OTP_PROVISION");
-      return;
-    }
-    char fp2[16];
-    otp_secret_fingerprint(fp2, sizeof(fp2));
-    snprintf(line, sizeof(line), "OK OTP_PROVISION id=%s", fp2);
-    send_line(line);
-
   } else if (strcmp(command, "FINGERPRINT_PROBE") == 0) {
     bool ok = fingerprint_probe();
     snprintf(line, sizeof(line),
