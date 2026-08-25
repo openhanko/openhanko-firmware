@@ -440,9 +440,9 @@ intensity, so the palette is exactly eight values and nothing between them:
 | mask | | mask | |
 | --- | --- | --- | --- |
 | `0x00` | off | `0x04` | red — refused, or armed to erase |
-| `0x01` | blue — waiting for a finger | `0x05` | purple — enrolling |
+| `0x01` | blue — idle, and waiting for a finger | `0x05` | purple — enrolling |
 | `0x02` | green — accepted | `0x06` | yellow — powered up |
-| `0x03` | cyan — unused | `0x07` | white — idle |
+| `0x03` | cyan — unused | `0x07` | white — unused |
 
 Anything off that list, orange included, is not a colour this ring can be asked
 for. Only the breathing effect takes a start and end colour separately, and it
@@ -452,13 +452,18 @@ transitions between two of the eight rather than mixing them.
 code, two colours and a cycle count, and that is the whole command. The only
 dimmers are *which channels are lit* and *what fraction of the time*: one die is
 dimmer than three, and breathing spends half its period near off. Idle takes the
-second and not the first, since a device nobody can find is worse than one that
-is a little bright.
+first and not the second — steady blue rather than a breathing colour — because
+a pulse in the corner of the eye is its own kind of loud, and one lit die is
+where the actual dimming happens.
+
+Idle and waiting share blue and separate by effect. That turns out to be the
+better cue anyway: a light that *starts moving* is easier to catch peripherally
+than one that changes hue.
 
 | mode | behaviour |
 | --- | --- |
 | power-up | **two yellow flashes**, then the ring goes to whatever the state calls for |
-| idle | **steady white** — enough to find the device on a dark desk |
+| idle | **steady blue** — the dimmest the ring goes without pulsing, and enough to find on a dark desk |
 | pinpad | **breathes blue** while waiting — macOS shows no prompt, so this is the entire invitation |
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 

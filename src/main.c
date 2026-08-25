@@ -261,10 +261,16 @@ static uint32_t boot_light_until;
 // Colour: the mask is one bit per channel, so WHITE is three dies lit and BLUE
 // is one. There is no third knob; PS_ControlBLN has no intensity field.
 //
-// Steady white is therefore the calmest *and* the brightest combination. If it
-// is still too much on a dark desk, BLUE is the lever, not the effect.
+// Steady blue is one die held at one level: the dimmest thing this ring can do
+// without moving, and the quietest it can be while still being findable. Below
+// this there is only BREATHE, which is dimmer on average but pulses, and
+// FINGERPRINT_IDLE_GLOW 0, which is a dark desk again.
+//
+// It shares blue with the waiting state, which breathes. Effect carries the
+// difference rather than colour, and it carries it well: a light that starts
+// pulsing is easier to catch at the edge of vision than one that changes hue.
 #define IDLE_LIGHT_EFFECT FP_LIGHT_STEADY
-#define IDLE_LIGHT_COLOR  FP_LED_WHITE
+#define IDLE_LIGHT_COLOR  FP_LED_BLUE
 
 static void mirror_light(status_led_mode_t mode) {
   static status_led_mode_t shown = (status_led_mode_t)-1;
@@ -290,8 +296,8 @@ static void mirror_light(status_led_mode_t mode) {
     case STATUS_LED_CONFIRM: fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 3); break;
     case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
 #if FINGERPRINT_IDLE_GLOW
-    // Separated from the waiting state by colour rather than by intensity, so
-    // that blue keeps meaning "you, now" and idle reads as off-duty.
+    // Same colour as the waiting state, separated by effect: steady is here,
+    // breathing is a request.
     //
     // Driven rather than left alone. STEADY and an unbounded BREATHE both stick,
     // where a bounded effect would end and let the module fall back to the blue
