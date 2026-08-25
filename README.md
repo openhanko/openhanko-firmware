@@ -458,7 +458,7 @@ is a little bright.
 | mode | behaviour |
 | --- | --- |
 | power-up | **two yellow flashes**, then the ring goes to whatever the state calls for |
-| idle | **breathes white** — enough to find the device on a dark desk |
+| idle | **steady white** — enough to find the device on a dark desk |
 | pinpad | **breathes blue** while waiting — macOS shows no prompt, so this is the entire invitation |
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 

@@ -253,6 +253,19 @@ static void mirror_light_invalidate(void) { mirror_light_stale = true; }
 #define BOOT_LIGHT_MS 700
 static uint32_t boot_light_until;
 
+// What the ring shows when the device has nothing to say.
+//
+// Two knobs, and they pull against each other. Effect: STEADY holds one level,
+// BREATHE spends half its period near off and so emits less light overall — but
+// it moves, and movement in the corner of an eye is its own kind of loud.
+// Colour: the mask is one bit per channel, so WHITE is three dies lit and BLUE
+// is one. There is no third knob; PS_ControlBLN has no intensity field.
+//
+// Steady white is therefore the calmest *and* the brightest combination. If it
+// is still too much on a dark desk, BLUE is the lever, not the effect.
+#define IDLE_LIGHT_EFFECT FP_LIGHT_STEADY
+#define IDLE_LIGHT_COLOR  FP_LED_WHITE
+
 static void mirror_light(status_led_mode_t mode) {
   static status_led_mode_t shown = (status_led_mode_t)-1;
   if (mirror_light_stale) { mirror_light_stale = false; shown = (status_led_mode_t)-1; }
@@ -277,17 +290,15 @@ static void mirror_light(status_led_mode_t mode) {
     case STATUS_LED_CONFIRM: fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 3); break;
     case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
 #if FINGERPRINT_IDLE_GLOW
-    // White, and separated from the waiting state by colour rather than by
-    // intensity. It is all three channels and so the brightest thing the ring
-    // does, which is the opposite of dim — but breathing still spends half its
-    // period near off, and an unlit device on a dark desk cannot be found at all.
+    // Separated from the waiting state by colour rather than by intensity, so
+    // that blue keeps meaning "you, now" and idle reads as off-duty.
     //
-    // Driven rather than left alone. An unbounded breathe sticks, where a
-    // bounded effect would end and let the module fall back to the blue
+    // Driven rather than left alone. STEADY and an unbounded BREATHE both stick,
+    // where a bounded effect would end and let the module fall back to the blue
     // breathing it does by default — the same behaviour that filled the gaps in
     // the mismatch warning and outlasted the power-up flash. Better that the
     // idle state is ours than the module's.
-    default:                 fingerprint_light(FP_LIGHT_BREATHE, FP_LED_WHITE, 0); break;
+    default:                 fingerprint_light(IDLE_LIGHT_EFFECT, IDLE_LIGHT_COLOR, 0); break;
 #else
     default:                 fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0); break;
 #endif
