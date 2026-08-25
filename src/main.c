@@ -273,10 +273,22 @@ static void mirror_light(status_led_mode_t mode) {
   shown = mode;
 
   switch (mode) {
-    case STATUS_LED_BREATHE: fingerprint_light(FP_LIGHT_BREATHE, FP_LED_BLUE, 0); break;
+    // Cyan rather than blue, now that idle breathes blue. Two lit channels
+    // against one reads as more insistent, which is the right way round: idle is
+    // saying "here I am" and this is saying "you, now".
+    case STATUS_LED_BREATHE: fingerprint_light(FP_LIGHT_BREATHE, FP_LED_CYAN, 0); break;
     case STATUS_LED_CONFIRM: fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 3); break;
     case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
+#if FINGERPRINT_IDLE_GLOW
+    // Not off. An unbounded breathe sticks, where a bounded effect would end and
+    // let the module fall back to breathing blue on its own — the same default
+    // that filled the gaps in the mismatch warning and outlasted the power-up
+    // flash. Driving it explicitly means the idle state is ours rather than the
+    // module's, and stays put.
+    default:                 fingerprint_light(FP_LIGHT_BREATHE, FP_LED_BLUE, 0); break;
+#else
     default:                 fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0); break;
+#endif
   }
 }
 

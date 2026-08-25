@@ -130,6 +130,20 @@
 #define STATUS_LED_GPIO -1
 #endif
 #define STATUS_LED_BRIGHTNESS 72
+
+// Whether the ring glows faintly when the device has nothing to say.
+//
+// A sealed unit on a dark desk is invisible without it: the sensor is a 19 mm
+// circle of the same plastic as everything around it, and the first job of the
+// device is to be findable.
+//
+// There is no brightness control to reach for. PS_ControlBLN takes a function
+// code, two colours and a cycle count, and the colour is a three-bit mask — so
+// the only two dimmers available are which channels are lit and what fraction of
+// the time. Idle uses both: blue alone is one LED die rather than three and the
+// dimmest of them to the eye, and breathing spends half its period near off.
+// That is as faint as this ring goes while still being lit.
+#define FINGERPRINT_IDLE_GLOW 1
 // Colour weights, multiplied by the brightness ramp.
 #define STATUS_LED_COLOR_R 0
 #define STATUS_LED_COLOR_G 1
