@@ -27,12 +27,27 @@ typedef struct {
   uint8_t module_serial[SETTINGS_SERIAL_LEN];
   uint32_t module_bound;   // 0 until a module has been recorded
   uint32_t crc;
+  // Deliberately after the CRC, and deliberately not covered by it.
+  //
+  // record_crc() sums named fields rather than the whole struct, so a field
+  // added inside its coverage would change the CRC of every record ever written
+  // and fail record_valid() on upgrade — which silently discards the module
+  // binding and the AID mode with it. Binding is what stops a swapped sensor,
+  // and losing it quietly during a firmware update is the opposite of its
+  // purpose.
+  //
+  // Outside the CRC, an old record still validates and this reads 0xffffffff
+  // from the erased remainder of the page, which is the "never set" case anyway.
+  // The cost is integrity on one cosmetic byte: the worst a flipped bit can do
+  // here is light the ring the wrong colour.
+  uint32_t idle_light;
 } settings_record_t;
 
 _Static_assert(sizeof(settings_record_t) <= SETTINGS_REGION_SIZE,
                "settings record must fit its sector");
 
 static aid_mode_t cached_mode;
+static uint8_t cached_idle_light;
 static bool cached_bound;
 static uint8_t cached_serial[SETTINGS_SERIAL_LEN];
 
@@ -73,9 +88,15 @@ void settings_init(void) {
     cached_mode = (aid_mode_t)record->aid_mode;
     cached_bound = record->module_bound != 0;
     memcpy(cached_serial, record->module_serial, sizeof(cached_serial));
+    // An erased word means a record written before this field existed, which is
+    // the same thing as never having chosen.
+    cached_idle_light = record->idle_light <= SETTINGS_IDLE_LIGHT_MAX
+                            ? (uint8_t)record->idle_light
+                            : (uint8_t)FINGERPRINT_IDLE_DEFAULT_COLOR;
   } else {
     cached_mode = (aid_mode_t)PIV_DEFAULT_AID_MODE;
     cached_bound = false;
+    cached_idle_light = (uint8_t)FINGERPRINT_IDLE_DEFAULT_COLOR;
     memset(cached_serial, 0, sizeof(cached_serial));
   }
 }
@@ -85,11 +106,13 @@ bool settings_module_bound(void) { return cached_bound; }
 const uint8_t *settings_module_serial(void) { return cached_serial; }
 
 // Writes the whole record, so callers that change one field keep the others.
-static bool commit(aid_mode_t mode, bool bound, const uint8_t *serial) {
+static bool commit(aid_mode_t mode, bool bound, const uint8_t *serial,
+                   uint8_t idle_light) {
   settings_record_t record = {
       .magic = SETTINGS_MAGIC,
       .aid_mode = (uint32_t)mode,
       .module_bound = bound ? 1u : 0u,
+      .idle_light = idle_light,
   };
   if (serial) memcpy(record.module_serial, serial, sizeof(record.module_serial));
   record.crc = record_crc(&record);
@@ -106,12 +129,43 @@ static bool commit(aid_mode_t mode, bool bound, const uint8_t *serial) {
   if (!record_valid(flash_record())) return false;
   cached_mode = mode;
   cached_bound = bound;
+  cached_idle_light = idle_light;
   if (serial) memcpy(cached_serial, serial, sizeof(cached_serial));
   return true;
 }
 
 bool settings_bind_module(const uint8_t *serial) {
-  return commit(cached_mode, true, serial);
+  return commit(cached_mode, true, serial, cached_idle_light);
+}
+
+// The module's colour mask is a bit per channel, so the names are the eight
+// combinations and there is nothing between them. Kept here rather than in the
+// console so that the string the device accepts and the string it reports back
+// cannot drift apart.
+static const char *const idle_light_names[] = {
+    "off", "blue", "green", "cyan", "red", "purple", "yellow", "white",
+};
+
+const char *settings_idle_light_name(uint8_t colour) {
+  return colour <= SETTINGS_IDLE_LIGHT_MAX ? idle_light_names[colour] : "?";
+}
+
+bool settings_idle_light_from_name(const char *name, uint8_t *out) {
+  for (uint8_t i = 0; i <= SETTINGS_IDLE_LIGHT_MAX; i++) {
+    if (strcmp(name, idle_light_names[i]) == 0) {
+      if (out) *out = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+uint8_t settings_idle_light(void) { return cached_idle_light; }
+
+bool settings_set_idle_light(uint8_t colour) {
+  if (colour > SETTINGS_IDLE_LIGHT_MAX) return false;
+  if (colour == cached_idle_light) return true;
+  return commit(cached_mode, cached_bound, cached_serial, colour);
 }
 
 aid_mode_t settings_aid_mode(void) {
@@ -122,7 +176,7 @@ bool settings_set_aid_mode(aid_mode_t mode) {
   if (mode == cached_mode) return true;
   // Carries the module binding through: a mode change must not silently unbind
   // the sensor, which writing only this field would do.
-  return commit(mode, cached_bound, cached_serial);
+  return commit(mode, cached_bound, cached_serial, cached_idle_light);
 }
 
 bool settings_reset(void) {
@@ -130,6 +184,9 @@ bool settings_reset(void) {
   flash_range_erase(SETTINGS_FLASH_OFFSET, SETTINGS_REGION_SIZE);
   restore_interrupts(interrupts);
   cached_mode = (aid_mode_t)PIV_DEFAULT_AID_MODE;
+  cached_idle_light = (uint8_t)FINGERPRINT_IDLE_DEFAULT_COLOR;
+  cached_bound = false;
+  memset(cached_serial, 0, sizeof(cached_serial));
   return true;
 }
 

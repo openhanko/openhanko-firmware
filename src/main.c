@@ -253,24 +253,19 @@ static void mirror_light_invalidate(void) { mirror_light_stale = true; }
 #define BOOT_LIGHT_MS 700
 static uint32_t boot_light_until;
 
-// What the ring shows when the device has nothing to say.
+// The idle ring holds steady rather than breathing.
 //
-// Two knobs, and they pull against each other. Effect: STEADY holds one level,
-// BREATHE spends half its period near off and so emits less light overall — but
-// it moves, and movement in the corner of an eye is its own kind of loud.
-// Colour: the mask is one bit per channel, so WHITE is three dies lit and BLUE
-// is one. There is no third knob; PS_ControlBLN has no intensity field.
+// Effect and colour pull against each other. BREATHE spends half its period near
+// off and so emits less light overall, but it moves, and movement at the edge of
+// vision is its own kind of loud. STEADY holds one level, so the dimming has to
+// come from the colour instead — one lit die rather than three. Which is where
+// it comes from: settings_idle_light() is a channel mask, and its default is
+// blue alone.
 //
-// Steady blue is one die held at one level: the dimmest thing this ring can do
-// without moving, and the quietest it can be while still being findable. Below
-// this there is only BREATHE, which is dimmer on average but pulses, and
-// FINGERPRINT_IDLE_GLOW 0, which is a dark desk again.
-//
-// It shares blue with the waiting state, which breathes. Effect carries the
-// difference rather than colour, and it carries it well: a light that starts
-// pulsing is easier to catch at the edge of vision than one that changes hue.
+// The colour is a stored preference, so it is read on every repaint rather than
+// compiled in. mirror_light() only writes on a change, so IDLE_LIGHT invalidates
+// to make the new colour appear at once instead of at the next state change.
 #define IDLE_LIGHT_EFFECT FP_LIGHT_STEADY
-#define IDLE_LIGHT_COLOR  FP_LED_BLUE
 
 static void mirror_light(status_led_mode_t mode) {
   static status_led_mode_t shown = (status_led_mode_t)-1;
@@ -288,6 +283,18 @@ static void mirror_light(status_led_mode_t mode) {
     }
     boot_light_until = 0;
   }
+  // The idle colour is a stored preference, so it can change while the mode does
+  // not. Comparing the mode alone would leave the old colour on the ring until
+  // something unrelated moved the indicator, which for an idle device could be
+  // hours. Noticing it here keeps the console command free of any hook back into
+  // this file.
+  static uint8_t shown_idle = 0xff;
+  uint8_t idle_now = settings_idle_light();
+  if (idle_now != shown_idle) {
+    shown_idle = idle_now;
+    shown = (status_led_mode_t)-1;
+  }
+
   if (!fingerprint_present() || mode == shown) return;
   shown = mode;
 
@@ -296,15 +303,21 @@ static void mirror_light(status_led_mode_t mode) {
     case STATUS_LED_CONFIRM: fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 3); break;
     case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
 #if FINGERPRINT_IDLE_GLOW
-    // Same colour as the waiting state, separated by effect: steady is here,
-    // breathing is a request.
+    // By default the same colour as the waiting state, separated by effect:
+    // steady is here, breathing is a request.
     //
     // Driven rather than left alone. STEADY and an unbounded BREATHE both stick,
     // where a bounded effect would end and let the module fall back to the blue
     // breathing it does by default — the same behaviour that filled the gaps in
     // the mismatch warning and outlasted the power-up flash. Better that the
-    // idle state is ours than the module's.
-    default:                 fingerprint_light(IDLE_LIGHT_EFFECT, IDLE_LIGHT_COLOR, 0); break;
+    // idle state is ours than the module's. Except when the user has asked for
+    // nothing at all, which needs an explicit off for the same reason.
+    default: {
+      uint8_t colour = settings_idle_light();
+      if (colour == 0) fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0);
+      else fingerprint_light(IDLE_LIGHT_EFFECT, (fp_color_t)colour, 0);
+      break;
+    }
 #else
     default:                 fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0); break;
 #endif

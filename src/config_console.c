@@ -133,7 +133,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "STATUS") == 0) {
     int status_len = snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x config=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
+             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x config=%s idle=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
              // What can authorise a signature. Without a sensor nothing can:
              // the button configures the device and never authenticates it.
@@ -143,6 +143,7 @@ static void handle_command(void) {
              piv_key_source_name(), piv_algorithm_name(),
              (unsigned)(-piv_key_parse_error()),
              config_authorized() ? "unlocked" : "locked",
+             settings_idle_light_name(settings_idle_light()),
              settings_aid_mode_name(settings_aid_mode()),
              piv_private_aid_selected() ? "yes" : "no",
              // Whether the button was down when the device booted. Reported so
@@ -392,6 +393,38 @@ static void handle_command(void) {
     tud_disconnect();
     sleep_ms(500);
     tud_connect();
+
+  } else if (strcmp(command, "IDLE_LIGHT") == 0 ||
+             strncmp(command, "IDLE_LIGHT ", 11) == 0) {
+    // What the ring shows when the device has nothing to say.
+    //
+    // A preference, not a policy: it gates nothing, reveals nothing and cannot
+    // be used to reach a key. It costs the configuration window rather than a
+    // press of its own, because a host that can already open that window gains
+    // nothing by changing an LED, and asking for a button every time somebody
+    // adjusts the brightness of their desk would be its own kind of wrong.
+    //
+    // The names are the module's three-bit mask: bit 0 blue, bit 1 green, bit 2
+    // red. "off" is 0. There is no brightness to set — see board_config.h — so
+    // the colour is the only dimmer there is, and fewer lit channels is dimmer.
+    if (command[10] == '\0') {
+      snprintf(line, sizeof(line), "OK IDLE_LIGHT %s",
+               settings_idle_light_name(settings_idle_light()));
+      send_line(line);
+      return;
+    }
+    uint8_t mask = 0;
+    if (!settings_idle_light_from_name(command + 11, &mask)) {
+      send_line("ERR IDLE_LIGHT usage=off|blue|green|cyan|red|purple|yellow|white");
+      return;
+    }
+    if (!require_config_authorization()) return;
+    if (!settings_set_idle_light(mask)) {
+      send_line("ERR IDLE_LIGHT write_failed");
+      return;
+    }
+    snprintf(line, sizeof(line), "OK IDLE_LIGHT %s", settings_idle_light_name(mask));
+    send_line(line);
 
   } else if (strncmp(command, "AID_MODE ", 9) == 0) {
     // Switches which application the card answers, and therefore which driver

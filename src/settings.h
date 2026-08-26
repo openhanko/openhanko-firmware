@@ -44,6 +44,24 @@ bool settings_module_bound(void);
 const uint8_t *settings_module_serial(void);
 bool settings_bind_module(const uint8_t *serial);
 
+// What the ring shows when the device has nothing to say, as the module's
+// three-bit colour mask: bit 0 blue, bit 1 green, bit 2 red. 0 is off.
+//
+// A preference rather than a policy — it gates nothing and protects nothing, and
+// exists because an unlit device on a dark desk cannot be found while a bright
+// one is an irritant in the same room. There is no brightness control on the
+// module, so the only dimmer is how many of the three dies are lit: one channel
+// is the quietest thing that is still visible.
+#define SETTINGS_IDLE_LIGHT_MAX 7u
+
+uint8_t settings_idle_light(void);
+bool settings_set_idle_light(uint8_t colour);
+
+// Names for the eight masks, and the parse back. Both live with the setting so
+// what the device accepts and what it reports cannot drift apart.
+const char *settings_idle_light_name(uint8_t colour);
+bool settings_idle_light_from_name(const char *name, uint8_t *out);
+
 aid_mode_t settings_aid_mode(void);
 
 // Persists the mode. Returns false if the flash write did not verify; the

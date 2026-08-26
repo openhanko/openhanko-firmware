@@ -337,6 +337,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | `FINGERPRINT_SECPROBE` | whether this module implements the safety instruction set, and what it returns |
 | `FINGERPRINT_INFO_RAW` | the raw 512-byte info page as hex, for checking the field offsets |
 | `OTP_STATUS` | whether the device holds a secret, and which one, by hash |
+| `IDLE_LIGHT [colour]` | what the ring shows when idle; `off` for nothing. Persists |
 | `AID_MODE standard\|pinpad` | force the AID mode instead of letting the probe decide |
 | `BOOTLOADER` | reboot to USB mass-storage bootloader |
 | `REBOOT`, `USB_RECONNECT` | as named |
@@ -345,8 +346,13 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 **Nothing here is irreversible, and nothing here reaches a key.** No command
 loads one, generates one, signs with one, enrols a finger, erases a template or
 burns a fuse — those either moved to a physical gesture or stopped existing.
-`AID_MODE` is the only one that writes anything at all, it costs a button press,
-and what it writes is which AID to answer.
+
+Two commands write, both to the settings sector and neither to anything else.
+`AID_MODE` costs a button press of its own, because it decides which driver
+macOS binds and a host that could change that unobserved would be choosing how
+the device is spoken to. `IDLE_LIGHT` costs only the configuration window,
+because it gates nothing and reveals nothing — a host that can already open that
+window gains nothing by changing an LED.
 
 That matters because the console is on the same cable as the card: whatever it
 can do, a host that owns the Mac can do.
@@ -458,12 +464,13 @@ where the actual dimming happens.
 
 Idle and waiting share blue and separate by effect. That turns out to be the
 better cue anyway: a light that *starts moving* is easier to catch peripherally
-than one that changes hue.
+than one that changes hue — and it survives the idle colour being changed to
+something else, which `IDLE_LIGHT` allows and a factory reset undoes.
 
 | mode | behaviour |
 | --- | --- |
 | power-up | **two yellow flashes**, then the ring goes to whatever the state calls for |
-| idle | **steady blue** — the dimmest the ring goes without pulsing, and enough to find on a dark desk |
+| idle | **steady blue** by default — the dimmest the ring goes without pulsing, and enough to find on a dark desk. Set with `IDLE_LIGHT`, including `off` |
 | pinpad | **breathes blue** while waiting — macOS shows no prompt, so this is the entire invitation |
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 
