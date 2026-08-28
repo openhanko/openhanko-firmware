@@ -19,6 +19,7 @@ that received them.
 from __future__ import annotations
 
 import argparse
+import errno
 import getpass
 import glob
 import os
@@ -53,6 +54,14 @@ class Console:
         try:
             self.fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         except OSError as error:
+            if error.errno == errno.EBUSY:
+                raise Failure(
+                    f"{port} is already in use. The OpenHanko app claims the "
+                    "console exclusively while it is running — close its window "
+                    "and try again. Two clients on one serial line do not fail, "
+                    "they interleave, which is why it is claimed rather than "
+                    "shared."
+                ) from error
             raise Failure(f"cannot open {port}: {error}") from error
         try:
             tty.setraw(self.fd)
