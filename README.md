@@ -446,7 +446,7 @@ intensity, so the palette is exactly eight values and nothing between them:
 | mask | | mask | |
 | --- | --- | --- | --- |
 | `0x00` | off | `0x04` | red — refused, or armed to erase |
-| `0x01` | blue — idle, and waiting for a finger | `0x05` | purple — enrolling |
+| `0x01` | blue — idle (steady), waiting (flashing) | `0x05` | purple — enrolling |
 | `0x02` | green — accepted | `0x06` | yellow — powered up |
 | `0x03` | cyan — unused | `0x07` | white — unused |
 
@@ -462,16 +462,21 @@ first and not the second — steady blue rather than a breathing colour — beca
 a pulse in the corner of the eye is its own kind of loud, and one lit die is
 where the actual dimming happens.
 
-Idle and waiting share blue and separate by effect. That turns out to be the
-better cue anyway: a light that *starts moving* is easier to catch peripherally
-than one that changes hue — and it survives the idle colour being changed to
-something else, which `IDLE_LIGHT` allows and a factory reset undoes.
+Idle and waiting share blue and separate by effect: steady against flashing.
+That is the better cue anyway — a light that *starts moving* is easier to catch
+peripherally than one that changes hue — and it survives the idle colour being
+changed to something else, which `IDLE_LIGHT` allows and a factory reset undoes.
+
+Flashing rather than breathing, because that state is the only one that has to
+interrupt somebody. A breath is a smooth ramp and the eye discards it at the
+edge of vision; an abrupt edge is what peripheral vision exists to catch.
+Breathing is left to enrolment, where the device waits rather than asks.
 
 | mode | behaviour |
 | --- | --- |
 | power-up | **two yellow flashes**, then the ring goes to whatever the state calls for |
 | idle | **steady blue** by default — the dimmest the ring goes without pulsing, and enough to find on a dark desk. Set with `IDLE_LIGHT`, including `off` |
-| pinpad | **breathes blue** while waiting — macOS shows no prompt, so this is the entire invitation |
+| pinpad | **flashes blue** while waiting — macOS shows no prompt, so this is the entire invitation, and it has to interrupt whatever the user is looking at |
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 
 The asymmetry is inherent. **macOS says nothing to the card until a PIN has

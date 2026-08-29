@@ -109,7 +109,7 @@ void status_led_update(status_led_mode_t mode) {
 
   // ~50 Hz is plenty for a breath and keeps the PIO FIFO out of the main loop's
   // way the rest of the time.
-  if (lit && shown == STATUS_LED_BREATHE && (now - last_refresh) < 20) return;
+  if (lit && shown == STATUS_LED_WAITING && (now - last_refresh) < 20) return;
   last_refresh = now;
   lit = true;
   shown = mode;

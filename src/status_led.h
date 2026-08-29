@@ -15,8 +15,12 @@
 // the user is not looking at.
 typedef enum {
   STATUS_LED_OFF = 0,
-  // A pinpad request is outstanding: "press when ready".
-  STATUS_LED_BREATHE,
+  // A pinpad request is outstanding: "touch when ready".
+  //
+  // Named for what it means rather than for what it looks like. It breathed once
+  // and now flashes, and the point of the name is that such a change is a
+  // decision about presentation rather than a different state.
+  STATUS_LED_WAITING,
   // Something just happened: "I heard you". Both modes can say this.
   //
   // Three quick flashes rather than a steady glow. A press is an event, and a

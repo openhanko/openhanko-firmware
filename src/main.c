@@ -46,7 +46,7 @@ static uint32_t confirm_until_ms;
 static status_led_mode_t led_mode(void) {
   // The invitation outranks the acknowledgement: if macOS is waiting on a
   // pinpad entry, saying "press" matters more than "I heard the last one".
-  if (usb_ccid_pin_pending()) return STATUS_LED_BREATHE;
+  if (usb_ccid_pin_pending()) return STATUS_LED_WAITING;
   if (confirm_until_ms != 0 && (int32_t)(now_ms() - confirm_until_ms) < 0) {
     return STATUS_LED_CONFIRM;
   }
@@ -299,7 +299,15 @@ static void mirror_light(status_led_mode_t mode) {
   shown = mode;
 
   switch (mode) {
-    case STATUS_LED_BREATHE: fingerprint_light(FP_LIGHT_BREATHE, FP_LED_BLUE, 0); break;
+    // Flashing, not breathing. This is the one state that has to interrupt
+    // somebody: macOS shows no prompt in pinpad mode, so the ring is the entire
+    // request, and it competes with whatever the user is actually looking at. A
+    // smooth ramp is easy to miss at the edge of vision; an abrupt edge is what
+    // peripheral vision is built to notice.
+    //
+    // Cycle count 0 is an infinite loop, so this is sent once and runs until the
+    // indicator moves on.
+    case STATUS_LED_WAITING: fingerprint_light(FP_LIGHT_FLASH, FP_LED_BLUE, 0); break;
     case STATUS_LED_CONFIRM: fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 3); break;
     case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
 #if FINGERPRINT_IDLE_GLOW
