@@ -39,11 +39,26 @@ add_executable(openhanko
 target_include_directories(openhanko PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 # Assembles ws2812.pio into ws2812.pio.h.
+target_compile_definitions(openhanko PRIVATE
+  FINGERPRINT_LAB_TOOLS=$<BOOL:${FINGERPRINT_LAB_TOOLS}>)
+
 if(FINGERPRINT_LAB_TOOLS)
-  target_compile_definitions(openhanko PRIVATE FINGERPRINT_LAB_TOOLS=1)
   message(WARNING "FINGERPRINT_LAB_TOOLS is ON: this build can permanently set "
                   "the fingerprint module's encryption level. Do not ship it.")
 endif()
+
+# -Wundef, on our own translation units only.
+#
+# An undefined macro in #if evaluates to 0 silently, so renaming a config macro
+# and missing one use site compiles cleanly and changes behaviour — which is
+# exactly how the idle light came to be forced off at the one place meant to
+# switch it on. The SDK uses that pattern deliberately and everywhere, so the
+# warning is worth nothing applied globally and worth having applied here.
+set_source_files_properties(
+  otp.c main.c button.c config_console.c fingerprint.c identity.c piv.c
+  status_led.c settings.c storage.c trace.c usb_ccid.c usb_descriptors.c
+  usb_hid.c
+  PROPERTIES COMPILE_OPTIONS "-Wundef")
 
 pico_generate_pio_header(openhanko ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 

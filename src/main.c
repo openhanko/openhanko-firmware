@@ -310,7 +310,6 @@ static void mirror_light(status_led_mode_t mode) {
     case STATUS_LED_WAITING: fingerprint_light(FP_LIGHT_FLASH, FP_LED_BLUE, 0); break;
     case STATUS_LED_CONFIRM: fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 3); break;
     case STATUS_LED_ARMED:   fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0); break;
-#if FINGERPRINT_IDLE_GLOW
     // By default the same colour as the waiting state, separated by effect:
     // steady is here, breathing is a request.
     //
@@ -326,9 +325,6 @@ static void mirror_light(status_led_mode_t mode) {
       else fingerprint_light(IDLE_LIGHT_EFFECT, (fp_color_t)colour, 0);
       break;
     }
-#else
-    default:                 fingerprint_light(FP_LIGHT_OFF, FP_LED_OFF, 0); break;
-#endif
   }
 }
 
