@@ -416,20 +416,33 @@ static void enroll_gate(void) {
     // configure the device, and a gesture that silently authorised whatever
     // macOS happened to be waiting for would be a surprise.
     printf("main: enrollment gate opened by slot %u (score %u)\n", slot, score);
-    // Two flashes for yes and one long for no. Green against red is the pair
-    // red-green colourblindness collapses, and at the gate this flash is the
-    // only feedback there is, so the count carries the meaning and the colour
+    // Two flashes for yes, a steady hold for no. Green against red is the pair
+    // red-green colourblindness collapses, and at the gate this is the only
+    // feedback there is, so the *character* carries the meaning and the colour
     // only reinforces it.
     fingerprint_light(FP_LIGHT_FLASH, FP_LED_GREEN, 2);
     enroll_open("gated by a matching finger");
   } else {
     printf("main: enrollment refused: no matching finger on the sensor\n");
     config_console_send_line("EVENT ENROLL_REFUSED");
-    fingerprint_light(FP_LIGHT_FLASH, FP_LED_RED, 1);
-    // The module lights its own ring during the failed match and leaves it
-    // breathing. Hand the indicator back, or it stays lit until something else
-    // happens to change the mode.
-    mirror_light_invalidate();
+    // Held, not flashed. One flash was missable twice over: brief by itself, and
+    // handing the ring straight back meant the next pass of the loop repainted
+    // the idle colour over it a millisecond later — so what reached the user was
+    // shorter than what was sent.
+    //
+    // A second flash would have fixed the duration and broken the meaning, since
+    // two-against-one is what separates accept from refuse without relying on
+    // seeing the colour. Steady against flashing says the same thing and is
+    // easier to catch.
+    fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0);
+    // Borrow the settle state, so the refusal is shown for as long as a result is
+    // and released the same way: poll_enrollment() hands the ring back when the
+    // deadline passes. It also swallows a second click while the refusal is on
+    // screen, which is the right answer to somebody clicking again because they
+    // thought nothing happened.
+    enroll_owns_ring = true;
+    enroll_state = ENROLL_SETTLE;
+    enroll_deadline = now_ms() + ENROLL_SETTLE_MS;
   }
 }
 

@@ -224,15 +224,21 @@ marks intent; the finger authorises it. Then lift, and present the new finger.
 | | ring |
 | --- | --- |
 | click, finger matches | two green flashes, then breathing purple |
-| click, finger does not match | one long red flash, nothing opens |
+| click, finger does not match | **steady red**, held, and nothing opens |
 | click, no finger | nothing — the click alone does not authenticate |
 | waiting for the new finger, 30 s | breathing purple |
 | enrolled | steady green |
 | timed out or failed | steady red, nothing stored |
 
-Two flashes against one carries the accept/reject distinction, with colour only
+Flashing against steady carries the accept/reject distinction, with colour only
 reinforcing it: green against red is the pair red-green colourblindness
-collapses, and at the gate that flash is the only feedback there is.
+collapses, and at the gate this is the only feedback there is.
+
+The refusal was one flash and was missed. Twice over, in fact — brief in itself,
+and the ring was handed straight back, so the next pass of the loop repainted the
+idle colour over it. A second red flash would have fixed the duration and broken
+the meaning, since the count was what distinguished the two answers. A hold does
+both.
 
 **The first finger is a special case**, because there is nothing yet to match
 against. A device with an identity but no template cannot authenticate for
