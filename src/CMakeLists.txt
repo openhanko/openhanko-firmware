@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.13)
 
-set(PICO_BOARD pico CACHE STRING "Board type")
+# Our own board, because no stock one describes this part. The RP2354A carries
+# 2 MB of flash in the package and the nearest SDK board (pico2) assumes 4 MB in
+# a separate chip — which put the identity and the settings at addresses this
+# part does not have. See boards/openhanko.h.
+list(APPEND PICO_BOARD_HEADER_DIRS "${CMAKE_CURRENT_LIST_DIR}/boards")
+set(PICO_BOARD openhanko CACHE STRING "Board type")
 
 # Must be set before pico_sdk_init(), which is when the SDK's pico_mbedtls
 # CMakeLists reads it and stamps MBEDTLS_CONFIG_FILE onto pico_mbedtls_headers.

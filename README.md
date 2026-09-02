@@ -35,6 +35,14 @@ boot and debug lockout are all working on hardware. What is left:
 
 ## Hardware
 
+Built for `PICO_BOARD=openhanko`, defined in `src/boards/openhanko.h`, because no
+stock SDK board describes this part. The nearest is `pico2`, which assumes 4 MB
+of flash in a separate chip — and `storage.c` and `settings.c` derive their
+regions from `PICO_FLASH_SIZE_BYTES`, so that assumption placed the identity and
+the settings at addresses a 2 MB part does not have. It appeared to work: a QSPI
+device ignores address bits above its own size, so both aliased quietly down into
+range. Correct by accident, on behaviour no datasheet promises.
+
 **RP2354A** — an RP2350 die with 2 MB of flash stacked in the same package —
 with an HLK-ZW111 fingerprint module. Development is on an RP2350-Zero with the
 sensor wired to the same pins.
