@@ -251,7 +251,19 @@ static void mirror_light_invalidate(void) { mirror_light_stale = true; }
 // 500 ms; the margin is for the module's cadence, and erring short costs a
 // truncated flash instead of a colour that means something else.
 #define BOOT_LIGHT_MS 700
-static uint32_t boot_light_until;
+
+// How long a refused finger stays red. The same as a successful enrolment result
+// is shown for, because it is the same kind of statement.
+#define REJECT_LIGHT_MS 1200
+
+// Holds the ring against repainting until the deadline passes.
+//
+// Two things need it and both were bitten by not having it: the power-up flash,
+// and a refused match. mirror_light() repaints whenever its idea of the state
+// differs from the mode, so anything painted outside it is overwritten on the
+// next pass of the loop — which for a brief signal means the user sees less than
+// was sent, or nothing at all.
+static uint32_t ring_held_until;
 
 // The idle ring holds steady rather than breathing.
 //
@@ -276,12 +288,12 @@ static void mirror_light(status_led_mode_t mode) {
     shown = (status_led_mode_t)-1;
     return;
   }
-  if (boot_light_until) {
-    if ((int32_t)(now_ms() - boot_light_until) < 0) {
+  if (ring_held_until) {
+    if ((int32_t)(now_ms() - ring_held_until) < 0) {
       shown = (status_led_mode_t)-1;
       return;
     }
-    boot_light_until = 0;
+    ring_held_until = 0;
   }
   // The idle colour is a stored preference, so it can change while the mode does
   // not. Comparing the mode alone would leave the old colour on the ring until
@@ -542,9 +554,28 @@ static void poll_fingerprint(void) {
     // afterwards. mirror_light() only writes on a change, so with the indicator
     // already OFF it saw nothing to do and the ring stayed lit. Invalidate the
     // cache so the next pass repaints whatever the indicator actually wants.
+    // Paint the refusal and hold it, rather than leaving the module's own brief
+    // flash to be repainted over on the next pass. This is the same fault the
+    // enrolment gate had — a signal shorter on screen than it was in the code —
+    // and it survived longer here because nothing on this path was ever painted
+    // deliberately at all.
+    fingerprint_light(FP_LIGHT_STEADY, FP_LED_RED, 0);
+    ring_held_until = now_ms() + REJECT_LIGHT_MS;
     mirror_light_invalidate();
+    // Say so. Without this a refusal is indistinguishable from nothing having
+    // happened, because the device is silent either way — and "touched with a
+    // finger it does not know" and "never touched" are different problems with
+    // different answers. The enrolment gate has always announced its refusal;
+    // ordinary authentication, which is the case a user actually meets, did not.
+    config_console_send_line("EVENT FINGERPRINT_REJECTED");
+    // And in the trace, which is the half that matters for diagnosis: TRACE is
+    // what the app's Diagnostics pane reads, and it recorded matches while
+    // showing nothing at all for a refusal — so a trace taken after a failed
+    // unlock looked exactly like one taken after no attempt.
+    trace_event("FINGER_REJECTED");
     // Also wait for a lift after a rejection, or the same unrecognised finger is
-    // re-tested several times a second for as long as it rests there.
+    // re-tested several times a second for as long as it rests there — and each
+    // retest would emit another line.
     finger_seen = true;
     return;
   }
@@ -717,7 +748,7 @@ int main(void) {
     // is no intensity to set. Of what exists, yellow is nearest, and it is not
     // one of the four the device already uses to mean something.
     fingerprint_light(FP_LIGHT_FLASH, FP_LED_YELLOW, 2);
-    boot_light_until = now_ms() + BOOT_LIGHT_MS;
+    ring_held_until = now_ms() + BOOT_LIGHT_MS;
   }
 
   // No RTOS. Everything runs here: USB, the console, and the button. The only

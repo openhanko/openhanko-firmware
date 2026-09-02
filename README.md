@@ -344,7 +344,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | --- | --- |
 | `PING` | → `PONG` |
 | `STATUS` | silicon stepping, key source, algorithm, AID mode, sensor, name |
-| `TRACE` / `TRACE_CLEAR` | ring buffer of CCID and APDU activity |
+| `TRACE` / `TRACE_CLEAR` | ring buffer of CCID and APDU activity, and whether a finger was accepted or refused |
 | `FINGERPRINT_PROBE` | re-run the link probe and report what answered |
 | `FINGERPRINT_INFO` | model, firmware, manufacturer, sensor name |
 | `FINGERPRINT_SN` | the module's per-die serial — what binding is against |
@@ -492,6 +492,7 @@ Breathing is left to enrolment, where the device waits rather than asks.
 | idle | **steady blue** by default — the dimmest the ring goes without pulsing, and enough to find on a dark desk. Set with `IDLE_LIGHT`, including `off` |
 | pinpad | **flashes blue** while waiting — macOS shows no prompt, so this is the entire invitation, and it has to interrupt whatever the user is looking at |
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
+| finger refused | **steady red**, held, whether the refusal came from the enrolment gate or from an ordinary touch |
 
 The asymmetry is inherent. **macOS says nothing to the card until a PIN has
 already been submitted** — measured three times, including one where a prompt sat
