@@ -120,6 +120,21 @@ static bool require_config_authorization(void) {
   return false;
 }
 
+// Lets an acknowledgement actually leave before the device goes away.
+//
+// config_console_send_line() pumps tud_task() only while the FIFO is still full,
+// so a short reply is accepted whole in one write, flushed, and then never
+// transmitted — the IN transfer happens inside tud_task(), and sleep_ms() does
+// not run it. Every command that reboots therefore lost its own reply, which is
+// why BOOTLOADER looked like a timeout to the host even when it had worked.
+static void settle_usb(uint32_t ms) {
+  uint32_t until = now_ms() + ms;
+  while ((int32_t)(now_ms() - until) < 0) {
+    tud_task();
+    sleep_ms(1);
+  }
+}
+
 static void handle_command(void) {
   // Sized for the STATUS line, which is the longest thing sent from here and
   // has grown twice. snprintf truncates in silence, so a field added without
@@ -389,7 +404,7 @@ static void handle_command(void) {
 
   } else if (strcmp(command, "USB_RECONNECT") == 0) {
     send_line("OK USB_RECONNECT");
-    sleep_ms(100);
+    settle_usb(100);
     tud_disconnect();
     sleep_ms(500);
     tud_connect();
@@ -462,18 +477,18 @@ static void handle_command(void) {
     snprintf(line, sizeof(line), "OK AID_MODE %s rebooting",
              settings_aid_mode_name(wanted));
     send_line(line);
-    sleep_ms(100);
+    settle_usb(100);
     watchdog_reboot(0, 0, 0);
 
   } else if (strcmp(command, "REBOOT") == 0) {
     send_line("OK REBOOT");
-    sleep_ms(100);
+    settle_usb(100);
     watchdog_reboot(0, 0, 0);
 
   } else if (strcmp(command, "BOOTLOADER") == 0) {
     if (!require_config_authorization()) return;
     send_line("OK BOOTLOADER");
-    sleep_ms(100);
+    settle_usb(100);
     // The boot ROM handles this in hardware, so it lands in the bootloader
     // every time rather than depending on timing.
     reset_usb_boot(0, 0);

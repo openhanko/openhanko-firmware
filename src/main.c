@@ -252,9 +252,13 @@ static void mirror_light_invalidate(void) { mirror_light_stale = true; }
 // truncated flash instead of a colour that means something else.
 #define BOOT_LIGHT_MS 700
 
-// How long a refused finger stays red. The same as a successful enrolment result
-// is shown for, because it is the same kind of statement.
-#define REJECT_LIGHT_MS 1200
+// How long a refused finger stays red.
+//
+// Not as long as an enrolment result. That is the end of a deliberate multi-step
+// gesture and can hold the eye; this interrupts whatever the user was doing, and
+// they may well want to try again immediately. Long enough not to be missed,
+// short enough not to be in the way — the same beat as the power-up flash.
+#define REJECT_LIGHT_MS 700
 
 // Holds the ring against repainting until the deadline passes.
 //
