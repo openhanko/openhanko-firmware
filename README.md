@@ -65,12 +65,9 @@ Pins are in [`src/board_config.h`](src/board_config.h).
 | serial | `openhanko.io:<12 hex>`, from the board's unique id at runtime |
 | strings | manufacturer `OpenHanko`, product `Smart Card` |
 
-The VID/PID is a sublicensed allocation, which is enough for the OS to tell the
-device apart from everything else on the bus. It does not permit USB-IF logo
-certification; that needs a VID of your own.
-
-macOS builds the reader name by concatenating the manufacturer and product
-strings, so they must differ or the pairing dialog reads "OpenHanko OpenHanko".
+The manufacturer and product strings must differ: macOS builds the reader name by
+concatenating them, so setting both to `OpenHanko` makes the pairing dialog read
+"OpenHanko OpenHanko".
 
 These are set in [`src/board_config.h`](src/board_config.h).
 
