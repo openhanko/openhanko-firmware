@@ -13,7 +13,8 @@ $ system_profiler SPSmartCardsDataType
 
 Derived from [ZimengXiong/tinyTouch](https://github.com/ZimengXiong/tinyTouch)
 (`firmware/tiny_touch_smartcard`); the PIV applet and CCID transport are
-substantially upstream's work. See [compared with tinyTouch](#compared-with-tinytouch).
+substantially upstream's work. MIT, with that copyright retained — see
+[LICENSE](LICENSE) and [compared with tinyTouch](#compared-with-tinytouch).
 
 ## Status
 
