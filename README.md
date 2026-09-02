@@ -32,129 +32,29 @@ boot and debug lockout are all working on hardware. What is left:
   [the button does not authenticate](#the-button-does-not-authenticate).
 - There is no real PIN, so a stolen device is worth what its credentials are
   worth. [THREAT-MODEL.md](THREAT-MODEL.md) says how far that goes.
-- The custom RP2354A boards are at fab; development is on an RP2350-Zero.
+- The shipped identity is generated before the debug port is fused, because
+  provisioning has to let the device boot to make its secret first.
 
 ## Hardware
 
-Built for `PICO_BOARD=openhanko`, defined in `src/boards/openhanko.h`, because no
-stock SDK board describes this part. The nearest is `pico2`, which assumes 4 MB
-of flash in a separate chip — and `storage.c` and `settings.c` derive their
-regions from `PICO_FLASH_SIZE_BYTES`, so that assumption placed the identity and
-the settings at addresses a 2 MB part does not have. It appeared to work: a QSPI
-device ignores address bits above its own size, so both aliased quietly down into
-range. Correct by accident, on behaviour no datasheet promises.
+**RP2354A, A4 stepping**, with an HLK-ZW111 fingerprint module. Development is on
+an RP2350-Zero with the sensor on the same pins.
 
-**RP2354A** — an RP2350 die with 2 MB of flash stacked in the same package —
-with an HLK-ZW111 fingerprint module. Development is on an RP2350-Zero with the
-sensor wired to the same pins.
+A4 is a requirement rather than a preference: errata E16, E20 and E24 are fixed
+in silicon and in no other way, and on A2 an attacker with the device and
+glitching equipment recovers the signing key whatever the firmware does. It
+cannot be told from `CHIP_ID.REVISION`, which reports the same value as A3 — the
+boot ROM version byte at `0x00000013` is the one that distinguishes them, and
+`STATUS` reports the result as `chip=`.
 
-Three properties make this the part rather than a faster one. It verifies a
-signed image at boot; it can permanently disable SWD through OTP; and
-`get_rand_64()` is backed by a hardware TRNG, which is what makes a generated key
-worth anything — a key is only as good as the randomness behind it, and one
-generated without a true entropy source looks like a key and is not.
+Built for `PICO_BOARD=openhanko`, defined in
+[`src/boards/openhanko.h`](src/boards/openhanko.h). No stock SDK board describes
+this part: the nearest is `pico2`, which assumes 4 MB of flash in a separate
+chip, and `storage.c` and `settings.c` derive their regions from
+`PICO_FLASH_SIZE_BYTES` — so building for the wrong board places the identity and
+the settings outside the flash that exists.
 
-The stacked flash matters too. On a part with an external flash chip, lifting it
-off with hot air and reading it is a ten-minute job needing no skill. In-package,
-that becomes decapsulation and probing — still possible, no longer casual.
-
-**Buy A4 stepping.** Errata E16, E20 and E24 are fixed in silicon and in no other
-way; on A2 a glitched chip can re-enable debug and read OTP, boot unsigned code,
-or have secure boot defeated with a laser. `STATUS` reports what you actually
-have as `chip=`.
-
-### Why not the RP2040
-
-It was the development platform through most of this project and is no longer
-supported. Its debug port cannot be closed, so anyone who opens the case reads
-the key out and steps around the sensor entirely — which makes the fingerprint
-decorative rather than protective. And `get_rand_64()` there is ring-oscillator
-jitter, so keys generated on one are development keys whatever else is done. It
-was also 2.4× slower at the only operation that matters: 469 ms to sign against
-196 ms here.
-
-### Pinout
-
-| function | pin |
-| --- | --- |
-| fingerprint module | UART1 @57600: **GP4** = MCU TX, **GP5** = MCU RX, **GP6** TouchOut |
-| configuration button | **GP12** to GND, internal pull-up — factory reset and enrollment only, never authentication |
-| indicator | none on the board: the module's own ring is the entire indicator |
-
-There is no discrete LED. A production unit is a sealed case, so anything on the
-PCB would be invisible; `STATUS_LED_GPIO` is `-1` and `status_led.c` compiles to
-no-ops. Every indication goes to the module's ring, including the factory reset
-gesture — which had driven only the board LED, and would otherwise have run an
-irreversible operation with no feedback at all.
-
-The ZW111 harness is six wires, not four:
-
-| ZW111 pin | to | direction |
-| --- | --- | --- |
-| 1 `V_Touch` | 3V3 | **permanently powered** — runs finger detection while the rest of the module sleeps |
-| 2 `TouchOut` | GP6 | module → MCU, asserts while a finger is on the sensor |
-| 3 `VCC` | 3V3 | |
-| 4 `TX` | **GP5** | module → MCU |
-| 5 `RX` | **GP4** | MCU → module |
-| 6 `GND` | GND | |
-
-**The UART lines cross.** The module's `TX` is an output and goes to GP5, which
-is the MCU's receiver; the module's `RX` is an input and comes from GP4, the
-MCU's transmitter. `FINGERPRINT_UART_TX` in `board_config.h` names the *MCU's*
-TX pin, not the module's — TX to TX is two outputs driving each other, and the
-symptom is a module that handshakes with nothing and looks dead.
-
-`V_Touch` is a power rail, not an option: it runs finger detection while the
-rest of the module sleeps, so it is in the harness regardless. `TouchOut` is the
-only wire that could have been left out, and is not.
-
-It earns the pin twice. Finger detection becomes a GPIO read instead of a
-`PS_GetImage` round trip, so an idle device stops holding a conversation with
-the module several times a second — and a match is refused unless the line
-agrees that something is touching the sensor, at both the start and the end of
-the capture. That turns forging a match from "replay bytes on RX" into "drive
-two lines in a plausible time relationship". Cost, not authentication — see
-[the sensor link](#the-sensor-link-cannot-be-authenticated).
-
-**It is active-high**, which the datasheet does not say — it names the pin,
-calls it a wake IRQ, and leaves the level to the unpublished protocol note.
-Established by reading `STATUS` with and without a finger on the sensor, and
-since then by every authentication the device has performed: with
-`FINGERPRINT_REQUIRE_TOUCH 1` a match is discarded unless the line agrees at both
-ends of the capture, so a wrong polarity would mean nothing ever authenticates.
-That is also the failure mode if the wire breaks — closed, not open, helped by
-the pin being pulled to the inactive level so a cut or unwired TouchOut reads as
-"no finger" rather than floating.
-
-`STATUS` reports it as `touch=up|down|unwired`, which is where to look first if a
-board stops accepting fingers. To rule the correlation out while debugging
-something else, set `FINGERPRINT_REQUIRE_TOUCH 0`.
-
-### Which stepping am I holding?
-
-`STATUS` reports it as `chip=`, e.g. `chip=rp2350-a4`.
-
-Read from the boot ROM version byte at `0x00000013`, not from
-`CHIP_ID.REVISION` — **A4 changed only the boot ROM and reports the same
-revision as A3**, so the revision field cannot tell them apart. `picotool` reads
-the same byte. `2` is A2, `3` is A3, `4` is A4.
-
-This is a security property, not trivia. Three findings from the RP2350 Hacking
-Challenge are fixed in silicon and in no other way:
-
-| | E16 glitch to debug + OTP | E20 unsigned boot | E24 laser fault | E9 GPIO |
-| --- | --- | --- | --- | --- |
-| **A2** | open | flag only | open | open |
-| **A3** | fixed | flag only | open | fixed |
-| **A4** | fixed | fixed | fixed | fixed |
-
-On A2, an attacker with the device and glitching equipment can recover the
-signing key whatever the firmware does. Mass production moved to A4 in July 2025;
-A4 parts are marked `RP2350A0A4`.
-
-`BOOT_FLAGS0.DISABLE_WATCHDOG_SCRATCH` is the documented mitigation for E20, and
-should not be set on A3 or A4: E20 is already fixed there, so it buys nothing,
-and it disables a register the SDK's application-level double-tap depends on.
+Pins are in [`src/board_config.h`](src/board_config.h).
 
 ### USB identity
 
@@ -172,12 +72,7 @@ certification; that needs a VID of your own.
 macOS builds the reader name by concatenating the manufacturer and product
 strings, so they must differ or the pairing dialog reads "OpenHanko OpenHanko".
 
-Defaults live in [`src/board_config.h`](src/board_config.h). For a bare
-board with nothing wired, set `BUTTON_USE_BOOTSEL 1` to borrow the BOOTSEL
-button. BOOTSEL sits on the QSPI bus rather than the GPIO bank, so reading it
-overrides the flash chip-select and blacks out interrupts for tens of
-microseconds; sampling is rate-limited to 20 ms to keep that off USB's back.
-Bench use only.
+These are set in [`src/board_config.h`](src/board_config.h).
 
 ## Build and flash
 
@@ -243,11 +138,9 @@ Flashing against steady carries the accept/reject distinction, with colour only
 reinforcing it: green against red is the pair red-green colourblindness
 collapses, and at the gate this is the only feedback there is.
 
-The refusal was one flash and was missed. Twice over, in fact — brief in itself,
-and the ring was handed straight back, so the next pass of the loop repainted the
-idle colour over it. A second red flash would have fixed the duration and broken
-the meaning, since the count was what distinguished the two answers. A hold does
-both.
+A refusal is held rather than flashed, for long enough to be read. Two flashes
+would have been easier to catch and would have destroyed the distinction, since
+the count is what separates the two answers without relying on the colour.
 
 **The first finger is a special case**, because there is nothing yet to match
 against. A device with an identity but no template cannot authenticate for
@@ -452,8 +345,8 @@ will do**.
 ## Indicator
 
 The fingerprint module's own ring, driven over the same UART that carries
-matches. There is no separate LED — see [pinout](#pinout) — which means the
-light the user is asked to react to is on the surface they are asked to touch.
+matches. There is no separate LED, which means the light the user is asked to
+react to is on the surface they are asked to touch.
 
 `PS_ControlBLN` takes a **three-bit colour mask**, one bit per channel and no
 intensity, so the palette is exactly eight values and nothing between them:
@@ -505,11 +398,9 @@ acknowledge a match after the fact. A sensor that reads a finger without a
 flicker looks broken, especially when the PIN it typed lands in a window the
 user is not looking at.
 
-The power-up flash exists for the same reason. A provisioned unit used to blink
-on its way through the SDK's double-reset bootloader window; that is gone, and
-the bootrom's double-tap that replaced it runs silently, so without this the
-device boots, binds and sits dark — indistinguishable from a dead one. It is
-skipped when the device has no finger enrolled, because the purple that means
+The power-up flash exists for the same reason. The bootrom's double-tap recovery
+runs silently, so without it a device boots, binds and sits dark —
+indistinguishable from a dead one. It is skipped when the device has no finger enrolled, because the purple that means
 "enrol one" is the more useful thing to show, and when the module does not match,
 because red means stop.
 
@@ -721,235 +612,38 @@ the right moment. A forged match response makes the device sign, and secure
 boot, SWD lockout and encryption at rest all keep working correctly because none
 of them are in that path.
 
-**The manual describes a way out, and whether these modules have it is still
-open.** Hi-Link documents a *safety instruction set* (`0xE0`–`0xE4`) and an
-encryption level in register 7:
+**The manual describes a way out that these modules do not have.** Hi-Link
+documents a *safety instruction set* (`0xE0`–`0xE4`) gated behind an encryption
+level in register 7. At levels 2 and above the module stops answering the
+ordinary commands — no `PS_Search`, no `PS_StoreChar`, no automatic registration
+— and enrolment and verification move into the safety set, where a verification
+is a challenge-response: the MCU sends `E_A(R)` for a fresh 16-byte nonce, and
+the module returns `E_B(T ‖ I ‖ S ‖ R[0..10])`, one block carrying the result and
+eleven bytes of that nonce. Forging it needs key B. `PS_LockKeyt` then refuses to
+ever issue another key pair, so provisioning at assembly and locking leaves an
+attacker unable to ask the module for one.
 
-| level | algorithm |
-| --- | --- |
-| 0 | none — everything except the safety set |
-| 1 | none, and no template upload/download |
-| 2 | SM4 (ECB) |
-| 3 | AES-128 (ECB) |
-| 4 | 3DES (ECB) |
-| 20 | RSA-1024 |
-| 21 | ECC P-256 |
+ECB does not sink it, which is worth recording because it looks as though it
+should: `P` is exactly one block, so there is no block structure to leak, and the
+response carries 88 bits of a nonce the attacker cannot predict.
 
-At levels 2 and above the module stops answering the ordinary commands
-altogether. The manual is explicit about which: no template upload or download,
-no image download, no precise comparison, no `PS_Search`, no `PS_StoreChar`, and
-**no automatic registration or verification**. Enrolment and verification both
-move into the safety set, and `PS_AutoEnroll` — which this firmware uses, and
-whose duplicate-refusal flag fixed a real bug — is simply gone.
+**None of it is reachable on these modules.** `PS_GetCiphertext` answers exactly
+as an opcode that does not exist does; writing register 7 is accepted but leaves
+`Secur Level` reading 0, so the encryption level never changes; and `PS_GetKeyt`
+returns success without clearing enrolled templates, which is its first
+documented act and the one it cannot skip. Three independent readings, one
+conclusion. That is consistent with a manual which scopes the set to "some
+fingerprint module products based on security chips" and never claims the ZW111
+is one, and it says nothing about the part being genuine.
 
-### The handshake, and why ECB does not sink it
+`FINGERPRINT_SECPROBE` is the check, and stays for the day a module from a line
+that does carry the security chip turns up. It reports the raw confirmation code:
+`0x31` or `0x2e` mean the opcode is implemented, `0x00` means it is not.
 
-`PS_GetKeyt` (`0xE0`) makes the module generate key material and send it to the
-MCU, which keeps it. **`PS_LockKeyt` (`0xE1`) then refuses to ever issue another
-pair**, and that is what makes the scheme worth anything: provision at assembly,
-lock, and an attacker who later opens the case cannot ask the module for a fresh
-key. At levels 2–4 the material is 32 bytes, read as two 16-byte keys A and B.
-
-A verification then runs:
-
-1. the MCU generates a fresh 16-byte random `R` and sends `E_A(R)`;
-2. the module decrypts it, searches, and builds one 16-byte block
-   `P = T(1) ‖ I(2) ‖ S(2) ‖ R[0..10]` — result, template id, score, and eleven
-   bytes of the MCU's own nonce;
-3. the module returns `E_B(P)`, and the MCU decrypts and checks those eleven
-   bytes against the `R` it just chose.
-
-ECB is the wrong default almost everywhere, and here it does not matter: `P` is
-exactly one block, so there is no block structure to leak, and the response
-carries 88 bits of a nonce the attacker cannot predict. Forging a match needs
-key B; replaying an old success needs the MCU to reuse `R`, which it does not.
-Someone who cuts the harness can still stop the device working, but can no
-longer make it sign.
-
-What it does not fix is the provisioning moment. `PS_GetKeyt` sends the keys over
-the same plain UART, so the assembly bench is inside the trust boundary — the
-manual says as much — and the keys then live in the MCU's encrypted storage,
-where the firmware can read them. That is the standing gap, not a new one.
-
-### What is unresolved
-
-### The probe cannot answer this from level 0
-
-`FINGERPRINT_SECPROBE` sends `PS_GetCiphertext` and reads what comes back. The
-module replies `0x00` — which for that command means "subsequent data packets
-will be sent" — and then sends nothing. It also sends `0x7F`, an opcode outside
-every range the manual assigns, and gets `0x00` from that too.
-
-The obvious reading is that `0xE2` is simply not implemented. It is not a safe
-reading, because **the manual says these functions are unsupported at
-`SecurLevel 0`** — "if the encryption level is set to 0 and 1 in Table 2-1, this
-function is not supported" — and level 0 is where the module sits. So `0x00`
-covers two different things:
-
-- an opcode this firmware does not implement, or
-- a safety-set opcode it does implement and will not run at this level.
-
-The manual gives a distinct code for the second, `0x31`, "the function does not
-match the encryption level". This firmware does not use it. Without that, the two
-cases are indistinguishable from level 0, and the control does not separate them
-— it only shows that `0x00` is also the answer to nonsense.
-
-What the probe does establish: the dispatcher is not indiscriminate in general
-(`PS_GetImage` returns `0x02` for "no finger", and the idle poll depends on it),
-and the stream path is not at fault (`PS_ReadINFpage` moves 512 bytes through
-it). Neither of those decides the question.
-
-**Raising the level decides it, and that write is one-way** — but two steps
-before it are not, and they may answer without spending anything.
-
-`PS_WriteReg` (`0x0E`) validates what it is given: `0x1a` for a register that
-does not exist, `0x1b` for a value that register does not accept, and neither
-changes anything. Register 7 is the encryption level, and 5 is Reserved in its
-value table. So:
-
-```sh
-./provision.py console 'FINGERPRINT_REG 200 0'   # expect cc=1a
-./provision.py console 'FINGERPRINT_REG 7 5'     # expect cc=1b
-./provision.py console 'FINGERPRINT_REG 7 3'     # the real one, AES-128
-```
-
-The first asks whether the module validates register numbers at all. If it
-returns `00`, it acknowledges writes it does not understand and nothing below it
-means anything — the same trap `FINGERPRINT_SECPROBE` fell into.
-
-The second is the one that matters. `1b` means register 7 exists *and* has a
-value table to check against, which is as close to "the encryption levels are
-real on this part" as anything reachable without committing. `1a` means there is
-no register 7, and the safety set is not there either.
-
-Only then the third, which cannot be undone. If the set is absent afterwards
-that module is finished: level 3 also refuses `PS_Search`, `PS_StoreChar` and
-`PS_AutoEnroll`, so it would have neither the ordinary path nor the secure one.
-
-`FINGERPRINT_REG` is **not in the firmware anyone ships**. It is the only
-irreversible thing a host could reach, so it lives behind a build option rather
-than a gate:
-
-```sh
-cmake -S src -B build-lab -DFINGERPRINT_LAB_TOOLS=ON
-```
-
-### The answer: register 7 is inert on this firmware
-
-Run, in order, on a module we were prepared to lose:
-
-```
-FINGERPRINT_REG 200 0   → cc=1a no_such_register
-FINGERPRINT_REG 7 5     → cc=00 written        (5 is Reserved in the manual)
-FINGERPRINT_REG 7 3     → cc=00 written        (a second write to a one-way register)
-FINGERPRINT_INFO        → seclevel=0
-```
-
-The first line is what makes the rest readable: this firmware **does** validate
-register numbers, so unlike the `0xE2` probe, a refusal here would have meant
-something. Register 7 is not refused — and then accepts a Reserved value, accepts
-a second write to a register the manual says "changes are not allowed after
-setting", and changes nothing.
-
-Those three facts have a second explanation, and the manual suggests it:
-"call the write system register `PS_WriteReg` instruction to set the encryption
-level, and then call the `PS_GetKeyt` instruction to obtain and store the secret
-key". Read as a sequence, the level is *staged* by the register write and only
-becomes real once a key exists — under which nothing is "set" yet, so `Secur
-Level` reads 0 and a second write is legal. `PS_GetCiphertext` cannot tell the
-two apart, because it needs a key that does not exist yet either.
-
-`PS_GetKeyt` can, and does:
-
-```
-FINGERPRINT_GETKEY CONFIRM  → cc=00 key_issued bytes=0
-STATUS                      → fp=1        (the template is still there)
-FINGERPRINT_INFO            → seclevel=0
-```
-
-`PS_GetKeyt` clears enrolled templates — that is its first documented act,
-unconditional and independent of anything else it does. The template survived. So
-the command acknowledged success and did not run, which is the same `0x00` an
-unimplemented opcode returns, and this time proved by the absence of a mandatory
-side effect rather than by an ambiguous reply.
-
-`seclevel` is read from offset 20 of the info page, and that offset is not a
-guess: the manual's parameter list lands on the page in its numbered order as
-consecutive 2-byte fields, which puts `Data Base Size` at 4 (the 100 the module
-reports), the device address at 8, packet size at 12, the baud coefficient at 14
-(×9600 = the rate it answers on), `Secur Level` at 20, and the table flag at 126
-holding the documented `0x1234`. Six anchors agreeing on one layout.
-
-**So the safety instruction set is not implemented on this firmware**, on three
-independent readings: `0xE2` is indistinguishable from the nonexistent `0x7F`,
-register 7 accepts anything and never changes `Secur Level`, and `0xE0`
-acknowledges success without performing the one thing it cannot skip.
-
-Nothing was lost finding that out. The module still reads `fp=1`, `seclevel=0`
-and `antifake=1`, keeps `PS_Search`, `PS_StoreChar` and `PS_AutoEnroll`, and
-verifies fingerprints normally. The experiment that looked like it would cost a
-module cost nothing.
-
-That closes it for these modules. What remains is a module from a line that has
-the security chip, and this one identifies itself well enough to ask Hi-Link
-directly: `model="XS-F2 SO" sw="Ver 5.01" mfr=" FPPASS" sensor="ICNF7352"`.
-
-One thing the same re-read did turn up, in the module's favour. Parameter 8,
-`ResSpitefullmg`, is anti-fake fingerprint detection — "used to prevent false
-fingerprints from merging into fingerprint templates" — with a reset value of 1
-and marked read-only. It reads 1 here, so it is on from the factory and cannot be
-turned off, by us or by anyone else. `FINGERPRINT_INFO` reports it as
-`antifake=`.
-
-That defends a different attack from the one the safety set would have: a lifted
-print or a moulded finger presented to the sensor, rather than a forged answer on
-the wire. It is worth knowing we have it, and worth not overstating — the vendor
-documents no detail about what the check does or how well.
-
-Its offset is the seventh anchor on the page layout: parameter 8 lands at 16 and
-reads exactly the documented reset value.
-
-Meanwhile a PIN mixed into the key-wrapping KDF closes the same attack without
-depending on any of this — see
-[THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered).
-
-### Why level 3 and not level 21
-
-The ECC level looks like the stronger choice and is not, for two reasons.
-
-**It is not asymmetric where it would matter.** `PS_GetKeyt` at level 21 sends
-the *private* key to the MCU; the module keeps the public one. A search response
-is then `P` encrypted **with the public key**, which the MCU decrypts with the
-private key. Public-key encryption gives confidentiality, not authorship — and
-forging a response is exactly an encryption, so anyone holding the public key can
-do it. The public key is derivable from the private key in our flash, and it is
-also sitting in the module. That is the same exposure as AES key B, not a smaller
-one. The asymmetry would only pay if the module *signed* with a key it never
-disclosed, and that is not what the manual describes: the one signature in the
-scheme runs the other way, with the MCU signing and the module verifying.
-
-**Level 3 is specified and level 21 is not.** "Use key B to encrypt P" is one
-AES-128 operation on one 16-byte block, with the layout of `P` given to the byte.
-"Use the public key to encrypt P" names no scheme — no KDF, no padding, no point
-encoding — and the manual then gives the response as **128 bytes**, which is
-1024 bits and exactly what level 20 (RSA-1024) returns. For P-256 that number
-makes no sense, and reads as copied from the level above.
-
-That matters most for the experiment itself. We are spending a module to answer
-"does the safety set exist", and the answer has to be unambiguous. At level 3, a
-failure means the set is absent. At level 21, a failure could equally mean we
-guessed their ECIES wrong, on a module we can no longer test any other way. If
-level 3 works, a second module can settle level 21 with the existence question
-already answered.
-
-Worth doing before spending one: the module reports `model`, `sw`, `mfr` and
-`sensor` strings through `FINGERPRINT_INFO`. Hi-Link can say from those whether
-this build has the set, and which of their lines does.
-
-Until then the honest claim is unchanged: **resists a compromised host, resists
-offline key extraction, does not resist physical possession.** And whichever way
-it goes, a PIN mixed into the key-wrapping KDF closes the same attack without
-depending on the module at all — see
+Until such a module exists, the honest claim is unchanged: **resists a
+compromised host, resists offline key extraction, does not resist physical
+possession.** A PIN mixed into the key-wrapping KDF closes the same attack
+without depending on the sensor at all — see
 [THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered).
 
 What raises cost without pretending to be authentication:
@@ -959,12 +653,12 @@ What raises cost without pretending to be authentication:
   module that changes. Defeats a swap with a stock module, not an emulator that
   replays the expected serial. **Implemented and in force**: the device records
   the module it finds when it has none stored, and refuses everything if it later
-  meets a different one. Confirmed across two modules — five of the twelve
-  meaningful bytes differ, so the serial is genuinely per-die.
+  meets a different one. Confirmed across modules: several of the twelve
+  meaningful bytes differ between them, so the serial is genuinely per-die.
 
   Not the info page's Product SN, which the manual defines as "indicate product
   model" — it names the part, not the unit, and binding to it would detect only a
-  different *kind* of sensor. Both modules report the same one.
+  different *kind* of sensor, and every module reports the same value.
 - **Correlate `TouchOut`.** *Implemented.* A match is discarded unless the line
   says a finger is present, checked before the capture and again after it.
 - **Drive the full sequence.** Never trust one confirmation byte; run
@@ -1038,8 +732,10 @@ version:
 3. **Gate `CONFIG_UNLOCK` on a fingerprint** rather than a button press, keeping
    the blank-device exemption so a fresh unit can still be set up.
 
-Not firmware, but on the same list: the RP2354A boards are at fab, and neither
-public repository has a LICENSE file yet.
+4. **A factory reset after lockdown**, so the shipped identity is generated with
+   secure boot on and the debug port already fused. Provisioning must let the
+   device boot to make its secret, so today's key exists briefly while SWD is
+   still open.
 
 ## Compared with tinyTouch
 
@@ -1099,7 +795,7 @@ a private AID as a *probe* gets both — untouched Mac, `pivtoken` binds, PIN ty
 driver present, our extension binds and a finger alone signs with no dialog at
 all. Neither mode needs the user to choose.
 
-**P-256 was forced, then turned out to matter.** The ESP32-S3 has a big-integer
+**P-256 rather than RSA.** The ESP32-S3 has a big-integer
 accelerator, so upstream never paid for RSA-2048. The Cortex-M0+ has no 64-bit
 multiply, and the same signature costs 2924 ms — long enough that the device
 reads as broken. P-256 brings it to 469 ms. The security consequence came after:
