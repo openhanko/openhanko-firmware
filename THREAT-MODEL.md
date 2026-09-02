@@ -7,12 +7,9 @@ all.
 **Everything under [Today](#5-today-what-actually-gates-what) describes shipped
 behaviour, verified against the source**, and
 [section 7](#7-what-each-defence-buys) marks each measure as in force or not.
-Anything not marked in force must not be claimed. That discipline is the point of
-the document: earlier drafts of our own README claimed a locked debug port and a
-`sudo` limitation that were both untrue, in opposite directions.
+Anything not marked in force must not be claimed.
 
-Last checked against `src/` after the console was reduced to commands that read
-or reboot.
+Last checked against `src/` in September 2026.
 
 ---
 
@@ -55,8 +52,6 @@ section 6.
 Posture varies more across these than across anything else, so a claim is
 meaningless without saying which one it describes.
 
-| state | debug port | key at rest | glitch errata |
-| --- | --- | --- | --- |
 | | state | debug port | key at rest | glitch errata |
 | ---: | --- | --- | --- | --- |
 | 1 | **RP2350 A2** | lockable | plaintext | E16, E20, E24 all open |
@@ -65,66 +60,63 @@ meaningless without saying which one it describes.
 | 4 | **RP2350 A4** + above + key wrapped to OTP | closed | ciphertext | fixed in silicon |
 | 5 | **RP2350 A4** + above + PIN in the KDF | closed | ciphertext, underivable without the PIN | fixed in silicon |
 
-Only the last row makes a stolen device inert. Read `chip=` from `STATUS` to
-find out which silicon is in front of you and `otp=` for whether it has a
-secret; nothing else reports either reliably.
+Only the last row makes a stolen device inert, and row 5 needs a PIN that does
+not exist yet. `STATUS` reports `chip=` and `otp=`, which between them say which
+row a device is on; nothing else reports either reliably.
 
 **A provisioned unit is row 4** — A4 silicon, secure boot on, SWD fused, key
-material wrapped to a chaffed OTP secret. Verified end to end on hardware: the
-bootloader reads that page as zeros and `picotool` is refused, while the signed
-firmware on the same die reads it and decrypts its identity.
+material wrapped to a chaffed OTP secret. The bootloader reads that page as zeros
+and `picotool` is refused, while the signed firmware on the same die reads it and
+decrypts its identity.
 
 The RP2354A's in-package flash raises the cost again. There is no separate chip
 to lift off, so the offline attack starts at decapsulation rather than hot air —
 and what it recovers is ciphertext.
 
-Row 5 needs a PIN and does not exist. `STATUS` reports `chip=` and `otp=`, which
-between them say which row a device is actually on.
-
 ## 5. Today: what actually gates what
 
-Verified in `src/piv.c`:
+Verified in `src/`:
 
 | operation | what it requires | what that costs an attacker holding the device |
 | --- | --- | --- |
 | `VERIFY` | any bytes — the PIN is discarded (`(void)data;`), always `9000`, 60 s window | nothing |
 | `GENERAL AUTHENTICATE` **slot 9D** (ECDH) | a fingerprint match inside a 60 s session window, not consumed on use | an enrolled finger |
 | `GENERAL AUTHENTICATE` **slot 9A** (sign) | a fingerprint match inside a 10 s window | an enrolled finger, which the user presents |
+| enrolling a finger | a button press *while a matching finger is on the sensor*; on a device with no template yet, the press alone | an enrolled finger and the device in hand |
 | `CONFIG_UNLOCK`, then `BOOTLOADER` | a button press, then a 120 s window | one press, and the bootloader still demands a signed image |
+| `AID_MODE` | a button press of its own, not the `CONFIG_UNLOCK` window | one press — and it changes which driver binds, not what signs |
+| `IDLE_LIGHT` | the `CONFIG_UNLOCK` window | nothing; it gates nothing and reveals nothing |
 | factory reset | button held through power-up; **no host path at all** | — |
 
 There is no PIN retry counter and no lockout, because there is no PIN to count
 against. `VERIFY` returns `9000` rather than the `63CX` retries-remaining a
 standard PIV card returns.
 
-**The console can no longer reach a key.** `PAIRING_MODE` used to be the
-exception — one button press, no `CONFIG_UNLOCK` in front of it, and both 9A and
-9D signed on demand for 120 seconds. It was there to let `sc_auth pair` finish
-unattended, a requirement that turned out not to exist: pairing binds a
-public-key hash read from the certificate and never asks the card to sign.
+**The console cannot reach a key.** In a shipped image no command signs,
+generates or loads key material, enrols a finger, erases a template or burns a
+fuse; what is left reads state, reboots, or writes one of the two settings above.
+That matters because the console shares a cable with the card — anything it can
+do, a compromised host can do — and it is the constraint that decides what may
+ever be added to it.
 
-It is gone, and so are the rest of the commands that could reach key material or
-templates: the staged identity upload, `GENERATE_IDENTITY`, `ENROLL`,
-`FINGERPRINT_ERASE`, and `BENCH`, which handed a host a signature as fast as the
-main loop would run one. What remains reads state or reboots. That matters
-because the console shares a cable with the card, so anything it can do, a
-compromised host can do.
+Two module bring-up commands sit outside that. `FINGERPRINT_REG` writes the
+module's registers and `FINGERPRINT_GETKEY` asks it for a key pair, which the
+manual says clears every enrolled template. Both exist only behind
+`-DFINGERPRINT_LAB_TOOLS=ON`, which is off by default and must stay off in
+anything shipped.
 
-Slot 9D used to be the sharpest edge: ungated entirely, so a compromised host
-could run key agreement against it silently and at will. It is now gated on a
-match, but against a *separate 60 s window* that signing does not consume —
-because macOS unwraps the login keychain there immediately after the 9A
-signature that logged the user in, and checking 9A's own window would refuse the
-unwrap that always follows a successful login.
-
-Verified on hardware: touch → 9A `9000` → 9D `9000` 1.2 s later, no prompts.
+**Slot 9D is gated against a window of its own.** A match opens 60 s there that
+use does not consume, rather than the 10 s slot 9A spends per signature. macOS
+unwraps the login keychain on 9D immediately after the 9A signature that logged
+the user in, so checking 9A's window would refuse the unwrap that always follows
+a successful login.
 
 ### What does hold today
 
 - **The private key never existed off-device.** Not "on the generate-on-device
-  path" — there is no other path. The two that could put a key on a device from
-  outside are removed, so no provisioning machine ever held one, there is no copy
-  to leak and no vendor to trust.
+  path" — there is no other path. Nothing in the firmware accepts a key from
+  outside, so no provisioning machine ever held one: there is no copy to leak and
+  no vendor to trust.
 - **Signing is RFC 6979 deterministic**, so a weak RNG cannot leak the key
   through a repeated or predictable nonce.
 - **Factory reset has no host-reachable path.** Malware cannot destroy a user's
@@ -159,7 +151,7 @@ stated in the product documentation in these words, not softened.
 
 ### Physical possession
 
-**Not defended, though swapping the sensor no longer works.** The device records
+**Not defended, though swapping the sensor does not work.** The device records
 its module's `PS_GetChipSN` and refuses everything if it later meets a different
 one, so the cheap attack — fit a module you control — is closed.
 
@@ -170,11 +162,13 @@ response, and secure boot, SWD lockout and OTP protection all keep working
 correctly — they are not in that path.
 
 **It cannot be fixed on this module.** The manual documents a safety instruction
-set that would turn the link into a challenge-response, and gates it behind an
-encryption level in register 7. That register is inert on this firmware: it
-accepts a Reserved value, accepts a second write to a register documented as
-one-way, and leaves `Secur Level` reading 0 — so the level never changes and the
-safety set answers like the unimplemented opcode it is. See the README.
+set that would turn the link into a challenge-response, gated behind an
+encryption level in register 7. Three independent readings say the set is not
+implemented on this module: `PS_GetCiphertext` answers exactly as an opcode that
+does not exist does; writing register 7 is accepted but leaves `Secur Level`
+reading 0, so the level never changes; and `PS_GetKeyt` returns success without
+clearing enrolled templates, which is its first documented act and the one it
+cannot skip.
 
 A PIN closes the same attack without depending on the module, and is the only
 measure here that does.
@@ -192,10 +186,10 @@ Ordered by what they actually close, not by effort.
 | **Key wrapped to an OTP secret** *(done)* | attacker B — a flash reader yields ciphertext | attacker C, who has the die and can ask the firmware to sign |
 | OTP **chaffing** *(done)* | the IOActive PVC/FIB antifuse read — the one hardware attack **A4 does not fix** | a lab willing to spend more than the chaffing costs |
 | Two boot keys with revocation *(done)* | a leaked or lost signing key ending the fleet | a leak nobody notices |
-| Sensor binding via `PS_GetChipSN` *(done)* | swapping the module for another — the serial is per-die, confirmed across two units | an emulator replaying the expected serial |
+| Sensor binding via `PS_GetChipSN` *(done)* | swapping the module for another — the serial is per-die, confirmed across modules | an emulator replaying the expected serial |
 | `TouchOut` correlation *(done)*, staged protocol, timing bounds | replaying one packet on RX | reading the published protocol and driving two lines |
 | **PIN mixed into the wrapping KDF** | **attacker C** — a stolen device is inert, forging a match unwraps nothing | someone who watches the user type the PIN |
-| ~~Authenticated sensor link~~ | would have closed the forged match outright | **unavailable** — register 7 is inert on this module, so the encryption level never changes and the safety set stays unreachable |
+| ~~Authenticated sensor link~~ | would have closed the forged match outright | **unavailable** — the safety instruction set is not implemented on this module, so there is no encryption level to raise |
 
 Two notes that are easy to get wrong:
 
@@ -220,13 +214,10 @@ per session, then touch — not a flag flip.
 2. **The firmware is the oracle.** It can read the OTP secret — that is the
    design — so a bug that leaks it costs everything the lockdown bought. A
    standing constraint, not a task: never add anything that returns it.
-3. **No rate limiting** on signature operations. Less reachable than it was —
-   `BENCH` used to hand any host an unlimited supply of them with no presence
-   check at all — but a fingerprint still opens a window rather than authorising
-   one operation.
-4. **A touch authorises a window, not an operation.** Slot 9A accepts any
-   signature for 10 s after a match and slot 9D for 60 s, the latter not
-   consumed on use. In driverless mode this is structural — the card is told
+3. **A touch authorises a window, not an operation, and nothing rate-limits
+   it.** Slot 9A accepts any signature for 10 s after a match and slot 9D for
+   60 s, the latter not consumed on use, with no cap on how many arrive inside
+   either. In driverless mode the window is structural — the card is told
    nothing until a PIN arrives, so the touch has to come first.
 
 ## 9. Claims we may and may not make
@@ -240,12 +231,9 @@ per session, then touch — not a flag flip.
 - A compromised host cannot sign without a fingerprint.
 - Credentials cannot be erased by any host command.
 - The device refuses to work if its fingerprint sensor is exchanged.
-- Firmware, hardware and protocol are published.
+- The firmware and the protocol it speaks are published.
 
-Each of those was verified on hardware rather than reasoned about. Two were
-wrong when first written and only the checking found it: the flash held 204
-bytes of plaintext after every write, and a device with secure boot lost its
-recovery path entirely.
+Each of those was verified on hardware rather than reasoned about.
 
 **May not:**
 

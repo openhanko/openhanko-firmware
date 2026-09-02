@@ -25,20 +25,24 @@ names itself after that key, and can erase itself back to factory state without
 a host.
 
 The sensor, the enrolment gesture, module binding, encryption at rest, secure
-boot and debug lockout are all working on hardware. What is left:
+boot and debug lockout are all in force. What is left is written up as
+gaps rather than features, in
+[THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered):
 
-- `CONFIG_UNLOCK` still opens on a button press rather than a fingerprint. What
-  it now gates is `BOOTLOADER` and nothing else — see
+- **No real PIN**, so a stolen device is worth what its credentials are worth. It
+  was blocked on encryption at rest, which is done, and it is the only defence
+  left against someone holding the device.
+- **A match opens a window rather than authorising one operation**, and nothing
+  rate-limits what arrives inside it.
+- **`CONFIG_UNLOCK` opens on a button press rather than a fingerprint.** What it
+  gates is `BOOTLOADER` and nothing else — see
   [the button does not authenticate](#the-button-does-not-authenticate).
-- There is no real PIN, so a stolen device is worth what its credentials are
-  worth. [THREAT-MODEL.md](THREAT-MODEL.md) says how far that goes.
-- The shipped identity is generated before the debug port is fused, because
+- **The shipped identity is generated before the debug port is fused**, because
   provisioning has to let the device boot to make its secret first.
 
 ## Hardware
 
-**RP2354A, A4 stepping**, with an HLK-ZW111 fingerprint module. Development is on
-an RP2350-Zero with the sensor on the same pins.
+**RP2354A, A4 stepping**, with an HLK-ZW111 fingerprint module.
 
 A4 is a requirement rather than a preference: errata E16, E20 and E24 are fixed
 in silicon and in no other way, and on A2 an attacker with the device and
@@ -87,18 +91,10 @@ cp -X build/openhanko.uf2 /Volumes/RP2350/
 **Double-tap RESET** enters the bootloader without holding BOOTSEL — but only on
 a board where `BOOT_FLAGS1.DOUBLE_TAP` has been burned, which `bootkeys.py` does
 during stage 1. On a board with nothing burned, use the BOOTSEL button or short
-QSPI_SS to ground through about 1 kΩ.
+QSPI_SS to ground through about 1 kΩ. See [recovery](#recovery).
 
-That flag is the bootrom's own mechanism, not the SDK's, and the difference
-matters. `pico_bootsel_via_double_reset` ran in the application: it stashed a
-magic in the watchdog scratch for a second reset to catch, which needs the
-firmware to boot — not the situation anyone wants a recovery path for. Enabling
-secure boot stops it working entirely. The bootrom's version runs before any
-application, so it rescues a board whose firmware is broken, unsigned or
-missing, and it survives secure boot. It costs 200 ms of boot rather than 800.
-
-A fresh clone needs `PICO_SDK_PATH` set explicitly. An existing `build/`
-directory caches it, so a missing SDK only surfaces on a clean checkout.
+`PICO_SDK_PATH` must be set explicitly on a fresh clone; an existing `build/`
+directory caches it.
 
 ## The button does not authenticate
 
@@ -134,10 +130,6 @@ marks intent; the finger authorises it. Then lift, and present the new finger.
 Flashing against steady carries the accept/reject distinction, with colour only
 reinforcing it: green against red is the pair red-green colourblindness
 collapses, and at the gate this is the only feedback there is.
-
-A refusal is held rather than flashed, for long enough to be read. Two flashes
-would have been easier to catch and would have destroyed the distinction, since
-the count is what separates the two answers without relying on the colour.
 
 **The first finger is a special case**, because there is nothing yet to match
 against. A device with an identity but no template cannot authenticate for
@@ -207,9 +199,6 @@ nothing happens — once solid, unplugging while still holding is the way out.
 Release is the commit deliberately. A device wedged against something in a bag
 can hold a button indefinitely but cannot let go.
 
-Measured: `OpenHanko #539755` → gesture → `OpenHanko #FA764A`, `source=flash`,
-`aid=standard`.
-
 ## Pair with macOS
 
 ```sh
@@ -222,7 +211,9 @@ sudo -k && sudo -v          # test: touch the sensor when macOS asks for the PIN
 macOS usually offers to pair on its own when the card is inserted; the "Unpaired
 SmartCard inserted" notification does the same thing as `pair`. `pair` reads the
 identity hash out of `sc_auth identities` and prints the `sudo sc_auth pair`
-command to run, or runs it with `--run`.
+command to run, or runs it with `--run`. The app in
+[openhanko-macos](https://github.com/openhanko/openhanko-macos) does the same
+thing with a button.
 
 `./provision.py monitor` prints device events live, which is the fastest way to
 tell whether a touch registered.
@@ -252,6 +243,12 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 loads one, generates one, signs with one, enrols a finger, erases a template or
 burns a fuse — those either moved to a physical gesture or stopped existing.
 
+Two module bring-up commands, `FINGERPRINT_REG` and `FINGERPRINT_GETKEY`, are
+compiled out unless `-DFINGERPRINT_LAB_TOOLS=ON` is passed. They write the
+module's own registers and ask it for a key pair, which the manual says clears
+every enrolled template — irreversible, and the reason they are not in a shipped
+image.
+
 Two commands write, both to the settings sector and neither to anything else.
 `AID_MODE` costs a button press of its own, because it decides which driver
 macOS binds and a host that could change that unobserved would be choosing how
@@ -261,9 +258,6 @@ window gains nothing by changing an LED.
 
 That matters because the console is on the same cable as the card: whatever it
 can do, a host that owns the Mac can do.
-
-`TRACE` is the most useful debugging tool here; it is the witness that settled
-most of the behaviour documented below.
 
 ## AID modes
 
@@ -292,21 +286,12 @@ pinpad mode                  ▼
 The probe is the mechanism: only our driver knows to ask for the private AID, so
 a SELECT of it proves the driver is installed. The device is never told.
 
-All four transitions measured on hardware:
-
-| behaviour | evidence |
-| --- | --- |
-| driverless by default | `aid=standard`, `pivtoken` binds, touch→signature with nothing installed |
-| upgrades on meeting its driver | forced to standard; back to `aid=pinpad claimed=yes` in under four seconds, unattended |
-| pinpad authenticates | `sudo` on a touch, no PIN typed |
-| reverts when the driver is gone | `aid=pinpad claimed=yes` → nothing registered → `aid=standard claimed=no` |
-
 **Answering both AIDs is safe only because the state is transient.** macOS binds
-exactly one token driver per card, at insertion. A card that *stays* in that
-state leaves two drivers racing: we measured that race flipping between reboots,
-and saw `sc_auth` file one identity under "not used for authentication" while
-that card silently stopped authenticating. Here the state lasts a few hundred
-milliseconds before the reboot makes it exclusive.
+exactly one token driver per card, at insertion, so a card that *stays* in that
+state leaves two drivers racing — the winner flips between reboots, and the loser
+can have its identity filed under "not used for authentication" while the card
+silently stops authenticating. Here the state lasts a few hundred milliseconds
+before the reboot makes it exclusive.
 
 **Consequence:** with the driver installed, forcing standard mode does not
 stick — the device meets the driver again and upgrades straight back. Driverless
@@ -333,11 +318,9 @@ The PIN is six random digits, generated fresh for each prompt, and is not a
 secret: `VERIFY` discards the bytes and accepts anything. The presence check is
 the only gate.
 
-Random rather than fixed because a fixed PIN teaches a number that looks like it
-means something. It does not — typing it by hand authenticates nothing, since the
-signature that follows still waits on a finger. The practical corollary is worth
-knowing: if you ever face a PIN box the device did not fill in, **any six digits
-will do**.
+Random rather than fixed, because a fixed one teaches a number that looks like it
+means something and does not. The corollary is worth knowing: if you ever face a
+PIN box the device did not fill in, **any six digits will do**.
 
 ## Indicator
 
@@ -361,21 +344,14 @@ transitions between two of the eight rather than mixing them.
 
 **There is no brightness control either** — `PS_ControlBLN` carries a function
 code, two colours and a cycle count, and that is the whole command. The only
-dimmers are *which channels are lit* and *what fraction of the time*: one die is
-dimmer than three, and breathing spends half its period near off. Idle takes the
-first and not the second — steady blue rather than a breathing colour — because
-a pulse in the corner of the eye is its own kind of loud, and one lit die is
-where the actual dimming happens.
+dimmers are which channels are lit, and what fraction of the time.
 
-Idle and waiting share blue and separate by effect: steady against flashing.
-That is the better cue anyway — a light that *starts moving* is easier to catch
-peripherally than one that changes hue — and it survives the idle colour being
-changed to something else, which `IDLE_LIGHT` allows and a factory reset undoes.
-
-Flashing rather than breathing, because that state is the only one that has to
-interrupt somebody. A breath is a smooth ramp and the eye discards it at the
-edge of vision; an abrupt edge is what peripheral vision exists to catch.
-Breathing is left to enrolment, where the device waits rather than asks.
+Idle and waiting share blue and separate by effect, steady against flashing,
+rather than by colour — so the cue survives the idle colour being changed to
+something else, which `IDLE_LIGHT` allows. Waiting flashes rather than breathes
+because it is the only state that has to interrupt somebody, and an abrupt edge
+is what peripheral vision catches. Breathing is left to enrolment, where the
+device waits rather than asks.
 
 | mode | behaviour |
 | --- | --- |
@@ -385,21 +361,16 @@ Breathing is left to enrolment, where the device waits rather than asks.
 | standard | **solid flash**, 700 ms, on a match, held through the signature |
 | finger refused | **steady red**, held, whether the refusal came from the enrolment gate or from an ordinary touch |
 
-The asymmetry is inherent. **macOS says nothing to the card until a PIN has
-already been submitted** — measured three times, including one where a prompt sat
-on screen for ten seconds and the card's whole record of it was a power-on and a
-power-off 7.5 seconds apart, with nothing asked in between.
+The asymmetry between the modes is inherent: **macOS says nothing to the card
+until a PIN has already been submitted**, so in standard mode there is no event
+to light up on and the device can only acknowledge a match after the fact. A
+sensor that reads a finger without a flicker looks broken, especially when the
+PIN it typed lands in a window the user is not looking at.
 
-So in standard mode there is no event to light up on; the device can only
-acknowledge a match after the fact. A sensor that reads a finger without a
-flicker looks broken, especially when the PIN it typed lands in a window the
-user is not looking at.
-
-The power-up flash exists for the same reason. The bootrom's double-tap recovery
-runs silently, so without it a device boots, binds and sits dark —
-indistinguishable from a dead one. It is skipped when the device has no finger enrolled, because the purple that means
-"enrol one" is the more useful thing to show, and when the module does not match,
-because red means stop.
+The power-up flash is there because a device that boots, binds and sits dark is
+indistinguishable from a dead one. It is skipped when no finger is enrolled,
+where the purple that means "enrol one" is more useful, and when the module does
+not match, where red means stop.
 
 ## Implementation notes
 
@@ -426,9 +397,9 @@ cert gets `GENERAL AUTHENTICATE` with `P1 = 0x11` instead of `0x07`.
 ### ECDSA is RFC 6979 deterministic
 
 `MBEDTLS_ECDSA_DETERMINISTIC`, and not optional. A predictable ECDSA nonce
-recovers the private key from a single signature, and taking the RNG out of the
-signing path removes that whole class of failure rather than mitigating it. Deriving the nonce from the key and message takes the RNG out of the
-signing path entirely.
+recovers the private key from a single signature; deriving the nonce from the key
+and the message takes the RNG out of the signing path entirely, which removes the
+whole class of failure rather than mitigating it.
 
 ### EC keys must use named-curve encoding
 
@@ -445,9 +416,8 @@ reports `alg=` and `keyrc=`.
 ### Omitting `MBEDTLS_PEM_PARSE_C` fails the same way
 
 Certificates still work, because `decode_pem_cert()` in `piv.c` does its own
-base64. The card enumerates, macOS offers to pair, and only signing fails — with
-`6f00`. `TRACE` pinned it by showing `6f00` where a missing presence check
-would have given `6982`.
+base64. The card enumerates, macOS offers to pair, and only signing fails, with
+`6f00` — where a missing presence check would have given `6982`.
 
 ### Apple's `pivtoken` ignores pinpad entirely
 
@@ -468,8 +438,8 @@ driver performs the authentication and the touch is the whole interaction. A
 signature, with **no `VERIFY` at all** — nothing was typed.
 
 What is *not* solved is applications that put up their own PIN field. Chrome's
-password manager unlocks correctly but still shows a modal and takes the typed
-its six random digits; pinpad governs the CryptoTokenKit-to-card leg, and an
+password manager unlocks correctly, but still shows a modal and takes the six
+digits the device types. Pinpad governs the CryptoTokenKit-to-card leg only; an
 application that collects a PIN itself never reaches it.
 
 ### Testing caveat
@@ -482,21 +452,18 @@ behind reality.
 
 ## Why there is no wireless
 
-BLE was built and measured: the device served the same applet over the air,
-`sudo` authenticated wirelessly, and a persistent CryptoTokenKit token signed
-through `SecKeyCreateSignature`. It was removed because:
+BLE was built and measured before it was dropped — the device served the same
+applet over the air and `sudo` authenticated wirelessly. Four reasons it is not
+shipped:
 
 - **It cannot be driverless.** macOS has one smart-card transport and it is USB.
 - **It cannot serve the login window.** No user session for CoreBluetooth and no
   TCC grant before login.
 - **A registered wireless token starves a wired card.** A persistent token is
   always "present", so it wins against a reader-backed token permanently and
-  silently. Measured: the wired card stopped authenticating entirely while an
-  out-of-range wireless device held the slot.
+  silently: the wired card stops authenticating entirely while an out-of-range
+  wireless device holds the slot.
 - It adds a battery, a charger and a radio to a device you plug in.
-
-The firmware ECDH, the AID mode switching and the driver architecture came out
-of that work. The code is in the history.
 
 ## Provisioning a unit
 
@@ -511,7 +478,7 @@ bootrom's recovery, a device secret, key material encrypted at rest, secure boot
 and no debug port. Every OTP write is permanent, so the script verifies what
 landed before continuing and refuses on any disagreement.
 
-**The order is not arbitrary and not obvious.** The device burns its own secret
+**The order is not arbitrary.** The device burns its own secret
 the first time it generates an identity, so it has to boot and run *before* page
 4 is locked — lock first and it can never write one, and a device with no secret
 cannot store an identity at all, which looks like a working board right up until
@@ -529,9 +496,9 @@ which the datasheet asks for: otherwise somebody who later gets a write to OTP
 can install a key of their own and sign what they like.
 
 The second key is a recovery path, not a copy. If the primary leaks, revoke it
-and sign with the spare — the fleet survives. With one key, a leak or a loss is
-terminal for every unit ever burned. Verified on hardware: primary-signed
-rejected after revocation, spare-signed still boots.
+and sign with the spare — a primary-signed image is then rejected and a
+spare-signed one still boots, so the fleet survives. With one key, a leak or a
+loss is terminal for every unit ever burned.
 
 Keep the spare offline. It is worth nothing if it lives beside the primary.
 
@@ -554,7 +521,7 @@ The PIV keys in flash are AES-256-GCM ciphertext under a key derived from a
 flash yields nothing usable.
 
 GCM rather than a bare cipher because the tag is what makes a bad decrypt
-legible: without it a corrupted or tampered record decrypts to plausible bytes
+legible. Without it, a corrupted or tampered record decrypts to plausible bytes
 that mbedTLS then tries to parse as a PEM key, and the complaint arrives about
 the wrong thing entirely.
 
@@ -620,8 +587,8 @@ eleven bytes of that nonce. Forging it needs key B. `PS_LockKeyt` then refuses t
 ever issue another key pair, so provisioning at assembly and locking leaves an
 attacker unable to ask the module for one.
 
-ECB does not sink it, which is worth recording because it looks as though it
-should: `P` is exactly one block, so there is no block structure to leak, and the
+ECB does not sink it, though it looks as though it should: `P` is exactly one
+block, so there is no block structure to leak, and the
 response carries 88 bits of a nonce the attacker cannot predict.
 
 **None of it is reachable on these modules.** `PS_GetCiphertext` answers exactly
@@ -674,7 +641,6 @@ it is not secret either.
 The full per-use-case analysis is in [THREAT-MODEL.md](THREAT-MODEL.md); the
 short version:
 
-
 - **A fingerprint proves an enrolled finger, not a person.** The sensor answers
   over an unauthenticated UART, so someone who opens the case can assert a match
   without one. Binding to the module's die stops the sensor being *swapped*;
@@ -714,25 +680,6 @@ provision.py           console client: status, events, macOS pairing
 The macOS driver and the site are in
 [openhanko-macos](https://github.com/openhanko/openhanko-macos) and
 openhanko-web.
-
-## Next steps
-
-The device works and is provisioned; what is left is written up as gaps rather
-than features, in [THREAT-MODEL.md](THREAT-MODEL.md#8-gaps-ordered). Shortest
-version:
-
-1. **A real PIN, mixed into the wrapping KDF.** The only thing that would make a
-   stolen device inert, and the only defence left against someone holding it. It
-   was blocked on encryption at rest, which is done, so it is now buildable.
-2. **Rate-limit signatures**, and consider making a match authorise one
-   operation rather than a window.
-3. **Gate `CONFIG_UNLOCK` on a fingerprint** rather than a button press, keeping
-   the blank-device exemption so a fresh unit can still be set up.
-
-4. **A factory reset after lockdown**, so the shipped identity is generated with
-   secure boot on and the debug port already fused. Provisioning must let the
-   device boot to make its secret, so today's key exists briefly while SWD is
-   still open.
 
 ## Compared with tinyTouch
 
@@ -780,8 +727,7 @@ whoever provisioned it could have kept a copy. That is fine when you provision
 your own. It stops being fine the moment somebody else assembles the device, and
 no amount of assurance fixes it — the question simply should not be askable.
 Generating on the device removes it: the private key has no representation
-outside the chip at any point. That single change is most of why the rest of this
-list exists.
+outside the chip at any point.
 
 **Driverless and pinpad from one image.** Upstream answers the standard PIV AID,
 so Apple's `pivtoken` binds and the device types a PIN over HID into whatever has
@@ -792,10 +738,11 @@ a private AID as a *probe* gets both — untouched Mac, `pivtoken` binds, PIN ty
 driver present, our extension binds and a finger alone signs with no dialog at
 all. Neither mode needs the user to choose.
 
-**P-256 rather than RSA.** The ESP32-S3 has a big-integer
-accelerator, so upstream never paid for RSA-2048. The Cortex-M0+ has no 64-bit
-multiply, and the same signature costs 2924 ms — long enough that the device
-reads as broken. P-256 brings it to 469 ms. The security consequence came after:
+**P-256 rather than RSA.** The ESP32-S3 has a big-integer accelerator, so
+upstream never paid for RSA-2048. Without one it is brutal: the same signature
+costs 2924 ms on an RP2040, long enough that the device reads as broken, against
+469 ms for P-256 on that part and 196 ms on the RP2350 this ships on. The
+security consequence came after:
 a weak RNG is survivable for RSA blinding and fatal for an ECDSA nonce, which is
 why signing here is RFC 6979 deterministic and why the RP2350's TRNG is the
 reason to move parts at all.
