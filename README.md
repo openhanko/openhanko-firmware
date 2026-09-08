@@ -133,7 +133,7 @@ collapses, and at the gate this is the only feedback there is.
 
 **The first finger is a special case**, because there is nothing yet to match
 against. A device with an identity but no template cannot authenticate for
-anybody, so it opens enrollment by itself at boot and keeps offering until one
+anybody, so it opens enrolment by itself at boot and keeps offering until one
 takes. That also removes the window the gesture cannot cover: there is never a
 period in which the device is paired and useful but unenrolled, which is the only
 period in which appropriating it would be worth anything.
@@ -306,6 +306,13 @@ signs.
 
 There is no `ins=20` VERIFY anywhere in it: no PIN is typed or transmitted. The
 `CCID 69` is the secure-PIN request, and only our driver sends one.
+
+While that request is outstanding the reader is claimed, so the card bounds it:
+a CCID time extension goes out once a second, and after 20 s the request is
+refused and released. In practice the host gives up first — CryptoTokenKit
+abandons the operation after about ten seconds, which is when the ring stops
+flashing and, on `sudo`, when `pam_smartcard` falls back to asking for a PIN on
+the TTY.
 
 ### Standard mode
 
@@ -661,20 +668,29 @@ short version:
 
 ```
 src/                   device firmware, RP2350 family
-  board_config.h       pins, AID default, timings
-  main.c               cooperative loop: presence, indicator, mode switching
+  boards/openhanko.h   the board definition; no stock SDK board fits this part
+  board_config.h       pins, AID default, timings, USB identity
+  main.c               cooperative loop: presence, indicator, enrolment gate,
+                       mode switching
   piv.c                PIV applet: certificates, VERIFY, GENERAL AUTHENTICATE,
                        ECDH on slot 9D
   identity.c           generates the device's own keypair and certificate
   fingerprint.c        HLK-ZW111 over UART (EF-01), PS_AutoEnroll, module binding
-  settings.c           which AID to answer, in its own flash sector
+  button.c             the one input; factory-reset gesture and enrolment intent
+  status_led.c         indicator mux, on the module's ring
+  settings.c           AID mode and idle colour, in their own flash sector
   storage.c            the PIV identity, in flash, encrypted, outside the image
   otp.c                the device secret that encrypts it, in one-time memory
   usb_ccid.c           CCID class driver over TinyUSB
   usb_hid.c            HID keyboard, for typing the PIN in standard mode
-  config_console.c     provisioning and diagnostics on CDC
+  usb_descriptors.c    descriptors, including bPINSupport
+  config_console.c     diagnostics and settings on CDC
   trace.c              ring buffer of CCID and APDU activity
+  mbedtls_config.h     which mbedTLS features are compiled in; two of the
+                       implementation notes above are about entries here
 provision.py           console client: status, events, macOS pairing
+bootkeys.py            signs an image and prepares the OTP writes
+provision-board.py     takes a blank board to a provisioned one
 ```
 
 The macOS driver and the site are in
