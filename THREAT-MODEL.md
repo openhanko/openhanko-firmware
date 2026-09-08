@@ -43,7 +43,7 @@ section 6.
 
 | | capability | defensible |
 | --- | --- | --- |
-| **A. Compromised host** | full control of the Mac; cannot touch the device | **yes** — the primary defended threat |
+| **A. Compromised host** | full control of the Mac; cannot touch the device | **yes** for confidentiality and integrity — the primary defended threat. Not availability; see gap 4 |
 | **B. Offline extraction** | has the device powered off; can desolder, read flash, use lab equipment | **yes** — flash yields ciphertext, and the key to it is in locked OTP |
 | **C. Physical possession, live** | has a working device; can open the case, cut and drive the sensor harness, glitch power | **no** — mitigations raise cost only |
 
@@ -157,8 +157,8 @@ one, so the cheap attack — fit a module you control — is closed.
 
 What remains is the link itself, which is plain UART with no authenticated mode
 and a 4-byte password that is not merely sent in clear but readable from the
-parameter page. An attacker who opens the case can drive the harness and forge a match
-response, and secure boot, SWD lockout and OTP protection all keep working
+parameter page. An attacker who opens the case can drive the harness and forge a
+match response, and secure boot, SWD lockout and OTP protection all keep working
 correctly — they are not in that path.
 
 **It cannot be fixed on this module.** The manual documents a safety instruction
@@ -219,6 +219,15 @@ per session, then touch — not a flag flip.
    60 s, the latter not consumed on use, with no cap on how many arrive inside
    either. In driverless mode the window is structural — the card is told
    nothing until a PIN arrives, so the touch has to come first.
+4. **Nothing defends availability.** A `PC_to_RDR_Secure` claims the reader until
+   a finger arrives or the card refuses it, which takes 20 s, and a host can open
+   them back to back. While one is outstanding no other consumer can acquire the
+   card. Observed with a `sudo` authentication left pending: two lock-screen
+   unlock attempts failed, each after a ten-second acquire timeout, reporting
+   *"SmartCard initialisation error"* until the device was unplugged. This costs
+   nothing in confidentiality or integrity — a host that can do it already owns
+   the Mac — and is listed because the symptom reads as a broken device rather
+   than as a host that is misbehaving.
 
 ## 9. Claims we may and may not make
 
@@ -244,6 +253,9 @@ Each of those was verified on hardware rather than reasoned about.
   bound sensor. The link carrying that answer is unauthenticated, so someone who
   opens the case can assert it without a finger.
 - ~~"A stolen device is safe."~~ It is not, and §6 says how far that goes.
+- ~~"A compromised host cannot interfere with it."~~ It cannot sign, but it can
+  hold the reader and deny the device to everything else, including the lock
+  screen. See gap 4.
 
 **Must state plainly:** a stolen device still authorises whatever a forged sensor
 answer authorises. Binding stopped the sensor being *swapped*; nothing yet stops
