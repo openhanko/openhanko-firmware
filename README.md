@@ -496,6 +496,33 @@ diagnose the others.
 A run that stops partway leaves a real board in a real state, so the script
 resumes by reading OTP rather than by being told where it got to.
 
+### Development units
+
+```sh
+./provision-board.py out/ --unlocked --commit
+```
+
+Stops once the device has made its own secret: no boot keys, no secure boot, no
+debug lockout. The board is complete and works — it simply runs whatever
+firmware it is given, and `STATUS` reports `secureboot=off debug=open` so it says
+so.
+
+**No slots are invalidated either**, and that is the point of a separate config.
+`stage1-keys.json` burns our two keys and nails slots 2 and 3 shut, which the
+datasheet asks for and which leaves an owner no slot of their own;
+`stage1-taponly.json` burns the double-tap recovery and nothing else, so all four
+stay open. Somebody who wants to sign their own firmware can, and somebody who
+wants ours can burn our public fingerprints instead.
+
+The same resumability finishes one later: re-run without `--unlocked` and it
+burns the keys, enables secure boot and disables debug, ending exactly where a
+factory-locked unit ends.
+
+What it gives up is the whole of encryption at rest. The secret is burned and
+the flash is ciphertext, but with secure boot off anyone holding the board can
+run firmware that reads the secret back — so the wrapping protects nothing. That
+is [row 2 of the threat model](THREAT-MODEL.md#4-device-states), not row 4.
+
 ### The two keys
 
 Four boot key slots exist. Two are used and the other two are marked invalid,

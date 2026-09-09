@@ -1,11 +1,32 @@
 #!/usr/bin/env python3
 """Takes a fresh RP2350 board all the way to a locked, production unit.
 
-    ./provision-board.py out/                 # rehearse, touching nothing
-    ./provision-board.py out/ --commit        # actually burn
+    ./provision-board.py out/                     # rehearse, touching nothing
+    ./provision-board.py out/ --commit            # actually burn
+    ./provision-board.py out/ --unlocked --commit # a development unit
 
 `out/` is a directory made by bootkeys.py, holding the signed firmware and the
 OTP configs for your keys.
+
+## The two products
+
+The default is a locked unit: our boot keys burned, the unused slots nailed
+shut, secure boot on, SWD gone.
+
+`--unlocked` stops after the device has made its own secret. No boot keys, no
+secure boot, no debug lockout — and, deliberately, no slots invalidated either,
+so the owner can install their own key and lock it down themselves. Everything
+else is identical, including the double-tap recovery and the sealed secret page.
+
+An unlocked board is not a half-finished one, and the script will happily finish
+it later: re-run without --unlocked and it burns the keys, enables secure boot
+and disables debug, ending exactly where a factory-locked unit ends. That
+resumability is the same mechanism that recovers an interrupted run.
+
+**What the owner gives up is the whole of encryption at rest.** The secret is
+still there and the flash is still ciphertext, but with secure boot off anybody
+holding the board can run firmware that reads the secret back. STATUS says
+`secureboot=off debug=open` so the device, and the app, tell the truth about it.
 
 Every OTP write here is permanent. The script is built around that: it verifies
 what landed before it goes on, refuses to continue when anything disagrees, and
@@ -127,22 +148,28 @@ def main() -> None:
         sys.exit(__doc__)
     outdir = sys.argv[1]
     commit = "--commit" in sys.argv
+    unlocked = "--unlocked" in sys.argv
     pt = tool()
     tmp = os.path.join(outdir, ".otpdump.bin")
 
     signed = os.path.join(outdir, "signed-primary.uf2")
-    stage1 = os.path.join(outdir, "stage1-keys.json")
+    stage1 = os.path.join(outdir, "stage1-taponly.json" if unlocked else "stage1-keys.json")
     stage2 = os.path.join(outdir, "stage2-enable.json")
-    for f in (signed, stage1, stage2):
+    need = (signed, stage1) if unlocked else (signed, stage1, stage2)
+    for f in need:
         if not os.path.exists(f):
             raise Abort(f"{f} missing — run bootkeys.py first")
 
     expect = json.load(open(stage1))
-    want0 = "".join("%02x" % b for b in expect["bootkey0"])
-    want1 = "".join("%02x" % b for b in expect["bootkey1"])
+    # stage1-taponly.json carries no keys, by design — nothing to compare against.
+    hexed = lambda k: "".join("%02x" % b for b in expect[k])
+    want0 = hexed("bootkey0") if "bootkey0" in expect else None
+    want1 = hexed("bootkey1") if "bootkey1" in expect else None
 
     print()
-    print("  OpenHanko board provisioning" + ("" if commit else "   [REHEARSAL — nothing will be burned]"))
+    print("  OpenHanko board provisioning"
+          + ("  [UNLOCKED — development unit]" if unlocked else "")
+          + ("" if commit else "   [REHEARSAL — nothing will be burned]"))
     print()
 
     # ---- 1. the board must be fresh ---------------------------------------
@@ -178,18 +205,26 @@ def main() -> None:
         run(pt, "load", signed)
     say("flashed signed firmware", os.path.basename(signed))
     if not done_tap and "double_tap" not in json.dumps(expect.get("boot_flags1", {})):
-        raise Abort("stage1-keys.json has no double_tap — it predates the bootrom "
+        raise Abort(f"{os.path.basename(stage1)} has no double_tap — it predates the bootrom "
                     "recovery. Re-run bootkeys.py before provisioning, or the board "
                     "loses its way back in the moment secure boot is enabled.")
 
     # ---- 3. keys and the bootrom's recovery, before anything requires them --
-    if done_keys and done_tap:
+    if unlocked:
+        if done_tap:
+            say("double-tap already burned", "skipping")
+        else:
+            burn(pt, stage1, commit)
+            say("burned double-tap recovery", "no keys, all four slots left open")
+    elif done_keys and done_tap:
         say("keys already burned", "skipping")
     else:
         burn(pt, stage1, commit)
         say("burned boot keys + double-tap")
 
-    if commit:
+    if unlocked:
+        say("no keys to verify", "this unit is signed for by whoever owns it")
+    elif commit:
         # Still in the bootloader from step 2, so the readback needs no detour.
         rows = otp_rows(pt, tmp)
         got0, got1 = key_at(rows, 0x080), key_at(rows, 0x090)
@@ -235,6 +270,22 @@ def main() -> None:
         say("locked the secret's page", "secure read-only, bootloader shut out")
 
     # ---- 6. require signatures ---------------------------------------------
+    #
+    # Where an unlocked unit stops. Everything above is shared with a locked one,
+    # so the board leaving here is a complete, working device — it simply runs
+    # whatever firmware it is given, and says so.
+    if unlocked:
+        print()
+        say("stopping here", "secure boot off, debug open, no keys burned")
+        if commit and os.path.exists(tmp):
+            os.unlink(tmp)
+        print()
+        print("  Development unit. STATUS will report secureboot=off debug=open.")
+        print("  Encryption at rest is nominal: anything that boots can read the secret.")
+        print("  To finish it later, re-run this script without --unlocked.")
+        print()
+        return
+
     if done_secure:
         say("secure boot already on", "skipping")
     else:

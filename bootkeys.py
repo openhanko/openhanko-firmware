@@ -9,6 +9,8 @@ Writes into `out/`:
     signed-spare.uf2        the same firmware, signed with the second
     stage1-keys.json        install both keys, and the bootrom's double-tap
                             recovery; signatures not yet required
+    stage1-taponly.json     the double-tap recovery alone, for units sold
+                            unlocked — no keys, and no slots nailed shut
     stage2-enable.json      require a valid signature to boot
     revoke-primary.json     retire the first key, leaving the spare
 
@@ -119,6 +121,24 @@ def main() -> None:
             "double_tap_delay": DOUBLE_TAP_DELAY,
         },
     })
+    # For a unit sold unlocked: the recovery, and nothing else.
+    #
+    # Deliberately without key_valid/key_invalid. stage1-keys.json nails slots 2
+    # and 3 shut, which is right for a unit we lock down ourselves and wrong for
+    # one somebody else is meant to be able to sign for: between our two keys and
+    # those two invalidations, all four slots are spoken for and the owner can
+    # never install their own. Leaving all four untouched is what makes "sign it
+    # yourself, lock it down yourself" true rather than a slogan.
+    #
+    # Double-tap still goes in. It is the way back into a board whose firmware
+    # does not boot, it is independent of signing, and an unlocked unit is the
+    # one most likely to need it.
+    write("stage1-taponly.json", {
+        "boot_flags1": {
+            "double_tap": 1,
+            "double_tap_delay": DOUBLE_TAP_DELAY,
+        },
+    })
     write("stage2-enable.json", {"crit1": {"secure_boot_enable": 1}})
     # Retiring the primary keeps the bits already burned: OTP only ever goes
     # 0 to 1, so a revocation is added to the mask rather than replacing it.
@@ -135,7 +155,8 @@ def main() -> None:
     print()
     print(f"  wrote {outdir}/")
     print("    signed-primary.uf2  signed-spare.uf2")
-    print("    stage1-keys.json    stage2-enable.json    revoke-primary.json")
+    print("    stage1-keys.json    stage1-taponly.json")
+    print("    stage2-enable.json  revoke-primary.json")
     print()
     print("  Check those fingerprints against your own records before loading")
     print("  anything. They can be reproduced from a PEM with:")
