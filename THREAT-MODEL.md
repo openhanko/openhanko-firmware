@@ -61,8 +61,15 @@ meaningless without saying which one it describes.
 | 5 | **RP2350 A4** + above + PIN in the KDF | closed | ciphertext, underivable without the PIN | fixed in silicon |
 
 Only the last row makes a stolen device inert, and row 5 needs a PIN that does
-not exist yet. `STATUS` reports `chip=` and `otp=`, which between them say which
-row a device is on; nothing else reports either reliably.
+not exist yet. `STATUS` reports `chip=`, `otp=`, `secureboot=` and `debug=`,
+which between them say which row a device is on; nothing else reports them
+reliably.
+
+**Rows 2 and 4 are both sold.** A unit ordered unlocked stops at row 2
+deliberately — secure boot off, debug open — so the wrapped key material in row 4
+is worth nothing on it: anyone holding it can run firmware that reads the secret
+back. That is a supported option, not a defect, which is why the device has to
+be able to say which of the two it is.
 
 **A provisioned unit is row 4** — A4 silicon, secure boot on, SWD fused, key
 material wrapped to a chaffed OTP secret. The bootloader reads that page as zeros

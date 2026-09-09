@@ -225,7 +225,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | command | effect |
 | --- | --- |
 | `PING` | → `PONG` |
-| `STATUS` | silicon stepping, key source, algorithm, AID mode, sensor, name |
+| `STATUS` | silicon stepping, key source, algorithm, AID mode, sensor, lockdown state, name |
 | `TRACE` / `TRACE_CLEAR` | ring buffer of CCID and APDU activity, and whether a finger was accepted or refused |
 | `FINGERPRINT_PROBE` | re-run the link probe and report what answered |
 | `FINGERPRINT_INFO` | model, firmware, manufacturer, sensor name |
@@ -542,6 +542,12 @@ and an all-ones secret produce byte-identical readouts.
 Once the page is locked and debug disabled, that secret is readable by signed
 firmware on that die and by nothing else — not SWD, not the bootloader, not
 `picotool otp get`.
+
+`STATUS` reports `secureboot=` and `debug=` for exactly this reason. A unit with
+neither fuse burned holds the same ciphertext in flash and the same secret in
+OTP, and until it could say so it was indistinguishable from a locked one — to
+its owner, and to the app that told them their key material was safe. `?` means
+the two copies of `CRIT1` disagree, which is a fault rather than an answer.
 
 **Which makes the firmware the oracle.** It can read the secret; that is the
 design. A bug that leaks it costs everything the rest of this bought, which is

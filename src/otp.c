@@ -10,6 +10,9 @@
 #include "pico/bootrom.h"
 #include "pico/rand.h"
 
+#include "hardware/regs/addressmap.h"
+#include "hardware/regs/otp_data.h"
+
 // With the ECC flag set, the bootrom presents each OTP row as two bytes and
 // handles the Hamming code itself. Without it a row is three raw bytes and the
 // correction is the caller's problem, which is not a problem worth owning.
@@ -145,4 +148,22 @@ bool otp_secret_fingerprint(char *out, uint32_t cap) {
     snprintf(out + (i * 2), cap - (uint32_t)(i * 2), "%02x", digest[i]);
   }
   return true;
+}
+
+otp_lockdown_t otp_lockdown(void) {
+  otp_lockdown_t out = {0};
+
+  // Raw window: 32-bit stride, 24 valid bits per row. The ECC window would
+  // decode a row that carries no ECC.
+  const volatile uint32_t *raw = (const volatile uint32_t *)OTP_DATA_RAW_BASE;
+  uint32_t crit1 = raw[OTP_DATA_CRIT1_ROW] & 0xffffffu;
+  uint32_t copy = raw[OTP_DATA_CRIT1_R1_ROW] & 0xffffffu;
+
+  // Disagreement is reported rather than resolved. Picking one copy, or OR-ing
+  // them, would turn a part that is halfway through a burn — or failing — into
+  // a confident answer, and this exists precisely so that nobody has to guess.
+  out.valid = (crit1 == copy);
+  out.secure_boot = (crit1 & OTP_DATA_CRIT1_SECURE_BOOT_ENABLE_BITS) != 0;
+  out.debug_disabled = (crit1 & OTP_DATA_CRIT1_DEBUG_DISABLE_BITS) != 0;
+  return out;
 }

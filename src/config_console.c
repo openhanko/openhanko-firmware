@@ -147,8 +147,9 @@ static void handle_command(void) {
     send_line("PONG");
 
   } else if (strcmp(command, "STATUS") == 0) {
+    otp_lockdown_t lockdown = otp_lockdown();
     int status_len = snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x config=%s idle=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
+             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x config=%s idle=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s secureboot=%s debug=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
              // What can authorise a signature. Without a sensor nothing can:
              // the button configures the device and never authenticates it.
@@ -172,6 +173,14 @@ static void handle_command(void) {
              !fingerprint_touch_wired() ? "unwired"
                                         : (fingerprint_touch_asserted() ? "down" : "up"),
              otp_secret_present() ? "set" : "none",
+             // What the OTP secret is actually worth. Encryption at rest depends
+             // on secure boot: without it, anyone holding the device can flash
+             // firmware that reads the secret and decrypts the key. A unit sold
+             // deliberately unlocked is a supported option, so this reports the
+             // posture rather than judging it — but it has to be reportable, or
+             // the two are indistinguishable to the owner and to the app.
+             !lockdown.valid ? "?" : (lockdown.secure_boot ? "on" : "off"),
+             !lockdown.valid ? "?" : (lockdown.debug_disabled ? "locked" : "open"),
              (unsigned)fingerprint_boot_rx_bytes(),
              fingerprint_boot_saw_hello() ? "hello" : "nohello",
              (unsigned)fingerprint_line_high(false), (unsigned)fingerprint_line_edges(false),

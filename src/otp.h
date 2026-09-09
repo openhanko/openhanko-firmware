@@ -97,3 +97,24 @@ bool otp_secret_provision(void);
 // device can be told apart and a provisioning step confirmed without the secret
 // itself ever crossing the console.
 bool otp_secret_fingerprint(char *out, uint32_t cap);
+
+// Whether this part's lockdown fuses are burned.
+//
+// Reported, never enforced. Firmware cannot make secure boot true, and a unit
+// that ships without it is a deliberate product option rather than a fault. What
+// the firmware owes is an honest answer: everything otp.h claims above depends
+// on secure boot and debug lockout being in place, and until now a device with
+// neither was indistinguishable from one with both — including to the macOS app,
+// which read `otp=set` and told the owner their key material was protected.
+//
+// CRIT1 is a raw 24-bit row, not an ECC one, and carries a redundant copy in the
+// row above it. So it is read through the raw window rather than through
+// otp_access(): asking the bootrom for ECC on a row that was never encoded
+// returns a corrected value for data that has no code to correct against.
+typedef struct {
+  bool valid;           // the two copies of CRIT1 agree with each other
+  bool secure_boot;     // only firmware signed with a burned key will run
+  bool debug_disabled;  // SWD is gone
+} otp_lockdown_t;
+
+otp_lockdown_t otp_lockdown(void);
