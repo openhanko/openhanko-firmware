@@ -141,6 +141,12 @@ That last line is the real product: **against attacker A, the device works.**
 device is worth having only together with the user's Mac, and the exposure ends
 at that Mac.
 
+That exposure includes the disk. Verified on hardware: with FileVault on, two
+taps at the login screen after a restart log the user in with no password, so
+the device unlocks the volume as well as the session. The bound stays where it
+was — the attacker needs the Mac too — but what they get for the pair is
+everything on it, not a signed-in desktop. Product copy says so in those terms.
+
 Presence is a fingerprint match, verified on hardware. It proves a finger
 enrolled on this device is present — which is a claim about *who*, bounded by
 what the sensor can distinguish and by the fact that the link carrying the answer
