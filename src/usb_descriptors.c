@@ -30,8 +30,56 @@
 
 #define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + 9 + 54 + 7 + 7 + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN)
 
+// TinyUSB's keyboard template with one item changed: the application usage is
+// Keypad (7) rather than Keyboard (6).
+//
+// macOS opens Keyboard Setup Assistant for any new device whose top-level usage
+// is Keyboard, asking it to press keys it does not have. loginwindow's trace
+// shows the decision: it reads PrimaryUsage, calls copykeyboardtype for the
+// vendor/product/country triple, and launches the assistant when that comes
+// back unknown. bCountryCode only changes the cache key — measured: with 33 the
+// dialog still appeared for a never-seen device — so the lever is the usage.
+//
+// A keypad is honest, too: this interface types digits and Enter, nothing else.
+// The array items are the same Keyboard/Keypad usage page, so the six-byte
+// report and HID_ASCII_TO_KEYCODE are unchanged.
+#define OPENHANKO_HID_REPORT_DESC_KEYPAD(...) \
+  HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP     )                    ,\
+  HID_USAGE      ( HID_USAGE_DESKTOP_KEYPAD   )                    ,\
+  HID_COLLECTION ( HID_COLLECTION_APPLICATION )                    ,\
+    __VA_ARGS__ \
+    HID_USAGE_PAGE ( HID_USAGE_PAGE_KEYBOARD )                     ,\
+      HID_USAGE_MIN    ( 224                                    )  ,\
+      HID_USAGE_MAX    ( 231                                    )  ,\
+      HID_LOGICAL_MIN  ( 0                                      )  ,\
+      HID_LOGICAL_MAX  ( 1                                      )  ,\
+      HID_REPORT_COUNT ( 8                                      )  ,\
+      HID_REPORT_SIZE  ( 1                                      )  ,\
+      HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE )  ,\
+      HID_REPORT_COUNT ( 1                                      )  ,\
+      HID_REPORT_SIZE  ( 8                                      )  ,\
+      HID_INPUT        ( HID_CONSTANT                           )  ,\
+    HID_USAGE_PAGE  ( HID_USAGE_PAGE_LED                   )       ,\
+      HID_USAGE_MIN    ( 1                                       ) ,\
+      HID_USAGE_MAX    ( 5                                       ) ,\
+      HID_REPORT_COUNT ( 5                                       ) ,\
+      HID_REPORT_SIZE  ( 1                                       ) ,\
+      HID_OUTPUT       ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE  ) ,\
+      HID_REPORT_COUNT ( 1                                       ) ,\
+      HID_REPORT_SIZE  ( 3                                       ) ,\
+      HID_OUTPUT       ( HID_CONSTANT                            ) ,\
+    HID_USAGE_PAGE ( HID_USAGE_PAGE_KEYBOARD )                     ,\
+      HID_USAGE_MIN    ( 0                                   )     ,\
+      HID_USAGE_MAX_N  ( 255, 2                              )     ,\
+      HID_LOGICAL_MIN  ( 0                                   )     ,\
+      HID_LOGICAL_MAX_N( 255, 2                              )     ,\
+      HID_REPORT_COUNT ( 6                                   )     ,\
+      HID_REPORT_SIZE  ( 8                                   )     ,\
+      HID_INPUT        ( HID_DATA | HID_ARRAY | HID_ABSOLUTE )     ,\
+  HID_COLLECTION_END
+
 uint8_t const smart_card_hid_report_descriptor[] = {
-  TUD_HID_REPORT_DESC_KEYBOARD()
+  OPENHANKO_HID_REPORT_DESC_KEYPAD()
 };
 
 static const tusb_desc_device_t device_descriptor = {
@@ -99,14 +147,14 @@ static const uint8_t configuration_descriptor[] = {
 
   // Interface 1: HID keyboard, used only for the dummy PIV PIN.
   //
-  // TUD_HID_DESCRIPTOR expanded by hand for one byte: bCountryCode. The macro
-  // leaves it 0 ("not supported"), and a keyboard macOS cannot place opens
-  // Keyboard Setup Assistant on first insertion, asking the device to press
-  // keys it does not have. 33 is the HID code for US layout, which is what the
-  // PIN digits are typed as. Every other byte matches the macro, so
-  // TUD_HID_DESC_LEN and CONFIG_TOTAL_LEN are unchanged.
-  9, TUSB_DESC_INTERFACE, ITF_NUM_HID, 0, 1, TUSB_CLASS_HID,
-     HID_SUBCLASS_BOOT, HID_ITF_PROTOCOL_KEYBOARD, 0,
+  // TUD_HID_DESCRIPTOR expanded by hand. bCountryCode is 33 (US), the layout
+  // the digits are typed in; it did not stop Keyboard Setup Assistant on its
+  // own — see the report descriptor above for what did. Byte count matches the
+  // macro, so TUD_HID_DESC_LEN and CONFIG_TOTAL_LEN are unchanged.
+  // Not a boot keyboard. Subclass 1 / protocol 1 declare exactly the thing
+  // the assistant exists for, and a keypad that only ever types digits has no
+  // use for BIOS boot protocol anyway.
+  9, TUSB_DESC_INTERFACE, ITF_NUM_HID, 0, 1, TUSB_CLASS_HID, 0, 0, 0,
   9, HID_DESC_TYPE_HID, U16_TO_U8S_LE(0x0111), 33, 1, HID_DESC_TYPE_REPORT,
      U16_TO_U8S_LE(sizeof(smart_card_hid_report_descriptor)),
   7, TUSB_DESC_ENDPOINT, EPNUM_HID, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(8), 10,
