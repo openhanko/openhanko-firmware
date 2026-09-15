@@ -14,6 +14,7 @@
 #include "piv.h"
 #include "settings.h"
 #include "trace.h"
+#include "version.h"
 #include "tusb.h"
 
 // Longest thing anyone sends is `AID_MODE standard`. The buffer is far larger
@@ -141,7 +142,9 @@ static void handle_command(void) {
   // room simply loses the tail of the line — which is where the device name
   // lives, and it looked like a quoting bug rather than a buffer one. The guard
   // below turns the next occurrence into an obvious error instead.
-  char line[320];
+  //
+  // 384 from 320 when fw= went in, which left 320 with sixteen bytes spare.
+  char line[384];
 
   if (strcmp(command, "PING") == 0) {
     send_line("PONG");
@@ -149,8 +152,9 @@ static void handle_command(void) {
   } else if (strcmp(command, "STATUS") == 0) {
     otp_lockdown_t lockdown = otp_lockdown();
     int status_len = snprintf(line, sizeof(line),
-             "OK STATUS chip=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x config=%s idle=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s secureboot=%s debug=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
+             "OK STATUS chip=%s fw=%s presence=%s keys=%s source=%s alg=%s keyrc=-0x%04x config=%s idle=%s aid=%s claimed=%s boothold=%s button=%s fp=%s touch=%s otp=%s secureboot=%s debug=%s boot_rx=%u/%s lines=tx:%u/%u,rx:%u/%u,min=%uus name=\"%s\"",
              chip_stepping(),
+             firmware_version(),
              // What can authorise a signature. Without a sensor nothing can:
              // the button configures the device and never authenticates it.
              piv_module_mismatch() ? "blocked"

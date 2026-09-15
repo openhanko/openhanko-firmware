@@ -96,6 +96,11 @@ QSPI_SS to ground through about 1 kΩ. See [recovery](#recovery).
 `PICO_SDK_PATH` must be set explicitly on a fresh clone; an existing `build/`
 directory caches it.
 
+The version is `project(… VERSION …)` in `src/CMakeLists.txt` plus the commit,
+stamped at build time: `0.2.0+09f45d2`. A build from uncommitted source says
+`.dirty`, which a signed release image should never do. `STATUS` reports it as
+`fw=`, and `picotool info` reads it from a board or a `.uf2`.
+
 ## The button does not authenticate
 
 A fingerprint match is the only thing that authorises a signature. The button's
@@ -225,7 +230,7 @@ CDC console, `115200`. `./provision.py console '<CMD>'` sends one.
 | command | effect |
 | --- | --- |
 | `PING` | → `PONG` |
-| `STATUS` | silicon stepping, key source, algorithm, AID mode, sensor, lockdown state, name |
+| `STATUS` | silicon stepping, firmware version, key source, algorithm, AID mode, sensor, lockdown state, name |
 | `TRACE` / `TRACE_CLEAR` | ring buffer of CCID and APDU activity, and whether a finger was accepted or refused |
 | `FINGERPRINT_PROBE` | re-run the link probe and report what answered |
 | `FINGERPRINT_INFO` | model, firmware, manufacturer, sensor name |
@@ -734,6 +739,8 @@ src/                   device firmware, RP2350 family
   usb_descriptors.c    descriptors, including bPINSupport
   config_console.c     diagnostics and settings on CDC
   trace.c              ring buffer of CCID and APDU activity
+  version.c            the version, for STATUS, picotool info and the macOS app
+  version.cmake        stamps release number + commit at build time
   mbedtls_config.h     which mbedTLS features are compiled in; two of the
                        implementation notes above are about entries here
 provision.py           console client: status, events, macOS pairing

@@ -12,7 +12,9 @@ set(PICO_BOARD openhanko CACHE STRING "Board type")
 set(PICO_MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/mbedtls_config.h")
 
 include(pico_sdk_import.cmake)
-project(openhanko C CXX ASM)
+# The firmware's release number. The commit is added at build time; see
+# version.cmake.
+project(openhanko VERSION 0.2.0 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 pico_sdk_init()
 
@@ -39,9 +41,21 @@ add_executable(openhanko
   usb_ccid.c
   usb_descriptors.c
   usb_hid.c
+  version.c
 )
 
-target_include_directories(openhanko PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+add_custom_target(openhanko_version
+  COMMAND ${CMAKE_COMMAND}
+    -DVERSION=${PROJECT_VERSION}
+    -DSRC=${CMAKE_CURRENT_LIST_DIR}
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/generated/openhanko_version.h
+    -P ${CMAKE_CURRENT_LIST_DIR}/version.cmake
+  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated/openhanko_version.h
+  COMMENT "Stamping the firmware version")
+add_dependencies(openhanko openhanko_version)
+
+target_include_directories(openhanko PRIVATE ${CMAKE_CURRENT_LIST_DIR}
+                                             ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 # Assembles ws2812.pio into ws2812.pio.h.
 target_compile_definitions(openhanko PRIVATE
