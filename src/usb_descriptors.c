@@ -98,8 +98,18 @@ static const uint8_t configuration_descriptor[] = {
   7, TUSB_DESC_ENDPOINT, EPNUM_CCID_IN, TUSB_XFER_BULK, 64, 0x00, 0,
 
   // Interface 1: HID keyboard, used only for the dummy PIV PIN.
-  TUD_HID_DESCRIPTOR(ITF_NUM_HID, 0, HID_ITF_PROTOCOL_KEYBOARD,
-                     sizeof(smart_card_hid_report_descriptor), EPNUM_HID, 8, 10),
+  //
+  // TUD_HID_DESCRIPTOR expanded by hand for one byte: bCountryCode. The macro
+  // leaves it 0 ("not supported"), and a keyboard macOS cannot place opens
+  // Keyboard Setup Assistant on first insertion, asking the device to press
+  // keys it does not have. 33 is the HID code for US layout, which is what the
+  // PIN digits are typed as. Every other byte matches the macro, so
+  // TUD_HID_DESC_LEN and CONFIG_TOTAL_LEN are unchanged.
+  9, TUSB_DESC_INTERFACE, ITF_NUM_HID, 0, 1, TUSB_CLASS_HID,
+     HID_SUBCLASS_BOOT, HID_ITF_PROTOCOL_KEYBOARD, 0,
+  9, HID_DESC_TYPE_HID, U16_TO_U8S_LE(0x0111), 33, 1, HID_DESC_TYPE_REPORT,
+     U16_TO_U8S_LE(sizeof(smart_card_hid_report_descriptor)),
+  7, TUSB_DESC_ENDPOINT, EPNUM_HID, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(8), 10,
 
   // Interfaces 2 and 3: CDC, used only by the provisioning console.
   TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 0, EPNUM_CDC_NOTIF, 8,
