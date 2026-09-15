@@ -449,6 +449,21 @@ password manager unlocks correctly, but still shows a modal and takes the six
 digits the device types. Pinpad governs the CryptoTokenKit-to-card leg only; an
 application that collects a PIN itself never reaches it.
 
+### macOS asks a keyboard to identify itself; it does not ask a keypad
+
+A new HID keyboard opens Keyboard Setup Assistant on first insertion, asking
+the device to press keys beside Shift that it does not have. The dialog looks
+like a fault and can need a replug to get past.
+
+`loginwindow`'s own trace shows what it decides on: it reads the interface's
+top-level usage, looks up the vendor/product/country triple, and launches the
+assistant when the triple is unknown. `bCountryCode` only changes that key — set
+to 33, a never-seen device got the dialog on cue — so the lever is the usage.
+The HID interface therefore declares **Keypad (7)**, not Keyboard (6), with no
+boot-keyboard subclass or protocol. It types ten digits and Enter, so that is
+also the honest description. Every array item stays on the same usage page and
+the six-byte report is unchanged.
+
 ### Testing caveat
 
 Smart-card token keys are only visible from a process with a full user session.
