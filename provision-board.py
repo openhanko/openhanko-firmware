@@ -242,10 +242,24 @@ def main() -> None:
     if commit:
         run(pt, "reboot", "-a", check=False)
         if not wait_for(lambda: bool(list_ports()), 45):
-            raise Abort("the board did not come up after flashing — stop here, it is "
-                        "still recoverable while secure boot is off")
+            raise Abort("the board never appeared as an OpenHanko serial port after "
+                        "flashing. It is probably still in the bootloader — picotool "
+                        "info will say. Unplug and replug it, then run this again; "
+                        "nothing burned so far is lost. This is recoverable while "
+                        "secure boot is off.")
         time.sleep(3)
-        with Console(list_ports()[0]) as console:
+
+        # One board at a time. list_ports() now answers only for OpenHankos, but
+        # an everyday one in another port is still an OpenHanko, and reading its
+        # STATUS would pass these checks while saying nothing about the board
+        # being provisioned.
+        ports = list_ports()
+        if len(ports) > 1:
+            raise Abort("more than one OpenHanko is plugged in:\n  "
+                        + "\n  ".join(ports)
+                        + "\nUnplug the others: this step reads STATUS to confirm the "
+                          "board made its secret, and the wrong answer would look fine.")
+        with Console(ports[0]) as console:
             status = console.send("STATUS", echo=False)[-1]
         if "otp=set" not in status:
             raise Abort(f"the device did not provision its secret:\n  {status}")

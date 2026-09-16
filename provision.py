@@ -23,6 +23,7 @@ import errno
 import getpass
 import glob
 import os
+import plistlib
 import re
 import select
 import subprocess
@@ -168,8 +169,48 @@ class Console:
 # --------------------------------------------------------------------------
 
 
+# The device's USB identity, from src/board_config.h.
+USB_VID, USB_PID = 0x16D0, 0x1551
+
+
+def _callouts(node: dict) -> list[str]:
+    found = [node["IOCalloutDevice"]] if "IOCalloutDevice" in node else []
+    for child in node.get("IORegistryEntryChildren", []):
+        found += _callouts(child)
+    return found
+
+
+def _ours(node: dict) -> list[str]:
+    found = []
+    if node.get("idVendor") == USB_VID and node.get("idProduct") == USB_PID:
+        found += _callouts(node)
+    for child in node.get("IORegistryEntryChildren", []):
+        found += _ours(child)
+    return found
+
+
 def list_ports() -> list[str]:
-    return sorted(glob.glob("/dev/cu.usbmodem*"))
+    """Serial ports belonging to an OpenHanko, by USB vendor and product.
+
+    Not a glob of /dev/cu.usbmodem*. That matches every USB serial device on the
+    machine, and provisioning paid for it: a board that had not come out of the
+    bootloader, plus another dev board on the same hub, was enough for the script
+    to interrogate the wrong device, get no answer, and report this board as
+    having failed to provision its secret.
+
+    Returns nothing rather than guessing when ioreg cannot be read; --port is the
+    way past that.
+    """
+    try:
+        out = subprocess.run(["ioreg", "-a", "-r", "-c", "IOUSBHostDevice", "-l", "-d", "12"],
+                             capture_output=True, check=True).stdout
+        tree = plistlib.loads(out) if out.strip() else []
+    except Exception:
+        return []
+    ports = []
+    for node in tree:
+        ports += _ours(node)
+    return sorted(set(ports))
 
 
 def pick_port(explicit: str | None) -> str:
@@ -178,8 +219,9 @@ def pick_port(explicit: str | None) -> str:
     ports = list_ports()
     if not ports:
         raise Failure(
-            "no /dev/cu.usbmodem* device found. Is the board plugged in and "
-            "running the firmware rather than sitting in the bootloader?"
+            f"no OpenHanko serial port found (USB {USB_VID:#06x}:{USB_PID:#06x}). Is the "
+            "board plugged in and running the firmware rather than sitting in the "
+            "bootloader? Pass --port to name a port yourself."
         )
     if len(ports) > 1:
         say(f"several ports found, using {ports[0]}")
