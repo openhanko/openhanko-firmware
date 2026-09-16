@@ -202,7 +202,11 @@ def list_ports() -> list[str]:
     way past that.
     """
     try:
-        out = subprocess.run(["ioreg", "-a", "-r", "-c", "IOUSBHostDevice", "-l", "-d", "12"],
+        # No -d: the callout device hangs four levels below the USB node, and
+        # each hub between the board and the Mac pushes it deeper. A depth
+        # limit that is generous for a board plugged straight in silently
+        # truncates the tree above the serial port for one behind a hub.
+        out = subprocess.run(["ioreg", "-a", "-r", "-c", "IOUSBHostDevice", "-l"],
                              capture_output=True, check=True).stdout
         tree = plistlib.loads(out) if out.strip() else []
     except Exception:

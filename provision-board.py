@@ -190,8 +190,15 @@ def main() -> None:
     # it, which is the thing that goes wrong at 2am.
     if done_debug:
         raise Abort("debug is already disabled — this board is finished")
-    if done_keys:
-        say("resuming", f"BOOT_FLAGS1=0x{flags1:06x} CRIT1=0x{crit1:06x}")
+    if done_keys or done_tap or done_secure or done_lock:
+        done = ", ".join(filter(None, [
+            "boot keys" if done_keys else None,
+            "double-tap" if done_tap else None,
+            "secure boot" if done_secure else None,
+            "OTP page locks" if done_lock else None,
+        ]))
+        say("resuming", f"already burned: {done} "
+                        f"(BOOT_FLAGS1=0x{flags1:06x} CRIT1=0x{crit1:06x})")
     else:
         say("board is fresh", "no keys, no flags, no locks")
 
