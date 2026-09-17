@@ -116,7 +116,20 @@ target_link_libraries(openhanko
 # The consequence for a board with nothing burned: no double-tap at all, so use
 # the BOOTSEL button or short QSPI_SS.
 
-pico_enable_stdio_uart(openhanko 1)
+# Both off. stdio_uart would put printf on UART0, which this board's header maps
+# to GP0/GP1 — two pins board_config.h assigns to nothing and the enclosure never
+# brings out. Every printf therefore clocked characters onto a pin with nothing
+# attached, at 115200 baud, blocking the main loop for a few milliseconds per
+# authentication to do it.
+#
+# The calls stay in the source. With no driver registered printf has nowhere to
+# write and costs nothing, so the diagnostics remain available to anyone who
+# builds for a bench with a probe on those pads by turning this back to 1.
+#
+# stdio_usb stays off for a different reason: the USB interfaces belong to the
+# smart card, and the configuration console writes to CDC directly rather than
+# through printf.
+pico_enable_stdio_uart(openhanko 0)
 pico_enable_stdio_usb(openhanko 0)
 
 pico_add_extra_outputs(openhanko)

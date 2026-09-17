@@ -17,7 +17,11 @@
 #include "storage.h"
 #include "trace.h"
 
-#define LOG(...) do { printf("piv: "); printf(__VA_ARGS__); printf("\n"); } while (0)
+// One call, not three. The prefix and the newline are concatenated into the
+// caller's literal at compile time, so a logged line is a single formatted
+// write rather than three separate ones. Every call site passes a literal
+// first argument, which is what makes the concatenation legal.
+#define LOG(fmt, ...) printf("piv: " fmt "\n", ##__VA_ARGS__)
 
 // Compile-time identity. main/CMakeLists.txt seeds this from secrets.example.h
 // when it is missing, so the include is unconditional and the compiler tracks
