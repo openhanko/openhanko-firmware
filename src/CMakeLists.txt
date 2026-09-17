@@ -14,7 +14,7 @@ set(PICO_MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/mbedtls_config.h")
 include(pico_sdk_import.cmake)
 # The firmware's release number. The commit is added at build time; see
 # version.cmake.
-project(openhanko VERSION 0.2.0 LANGUAGES C CXX ASM)
+project(openhanko VERSION 0.2.1 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 pico_sdk_init()
 
